@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
+using Avalonia.Markup.Xaml.Styling;
 using Watchdog.Core;
 using Watchdog.Infrastructure;
 
@@ -62,8 +63,8 @@ public sealed class App : Application
 {
     public override void Initialize()
     {
-        RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
         Styles.Add(new FluentTheme());
+        Styles.Add(new StyleInclude(new Uri("avares://HerdrAutoContinue/")) { Source = new Uri("avares://HerdrAutoContinue/ThemeStyles.axaml") });
     }
     public override void OnFrameworkInitializationCompleted()
     {

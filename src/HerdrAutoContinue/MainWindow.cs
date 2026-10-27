@@ -11,7 +11,7 @@ namespace HerdrAutoContinue;
 
 public sealed class MainWindow : Window
 {
-    private static readonly IBrush Teal = Brush.Parse("#087F8C"), Secondary = Brush.Parse("#667685");
+    private const string Accent = "AppAccent", Secondary = "AppSecondary";
     private readonly MainViewModel model;
     private readonly Func<Task> quit;
     public MainWindow(MainViewModel model, Func<bool> isExiting, Func<Task> openSettings, Func<Task> quit)
@@ -21,7 +21,6 @@ public sealed class MainWindow : Window
         Title = "Herdr Auto Continue"; Width = 1080; Height = 850; MinWidth = 900; MinHeight = 720;
         using (var icon = typeof(MainWindow).Assembly.GetManifestResourceStream("HerdrAutoContinue.AppIcon.ico"))
             if (icon is not null) Icon = new WindowIcon(icon);
-        Background = Brush.Parse("#FAFCFD");
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Enter, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control), Command = model.ToggleCommand });
         Content = BuildContent(openSettings);
         Closing += (_, e) =>
@@ -36,9 +35,9 @@ public sealed class MainWindow : Window
     {
         var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,170,Auto") };
         var heading = new Grid { ColumnDefinitions = new("64,*,Auto"), Margin = new(24, 20) };
-        heading.Children.Add(new TextBlock { Text = "↻", FontSize = 47, Foreground = Teal, VerticalAlignment = VerticalAlignment.Center });
+        heading.Children.Add(Text("↻", 47, color: Accent));
         Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Text("按地区优先级恢复代理，连通后续接 agent", 13, color: Secondary) } }, column: 1);
-        var toggle = new Button { Width = 132, Height = 42, Background = Teal, Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var toggle = new Button { Width = 132, Height = 42, Classes = { "accent" }, HorizontalContentAlignment = HorizontalAlignment.Center };
         toggle.Bind(ContentControl.ContentProperty, new Binding(nameof(MainViewModel.ToggleText)));
         toggle.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(toggle, "service-toggle");
@@ -50,12 +49,12 @@ public sealed class MainWindow : Window
         Add(root, heading);
 
         var summary = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
-        var summaryText = Bound(nameof(MainViewModel.Summary), 13, Teal); AutomationProperties.SetAutomationId(summaryText, "service-state");
+        var summaryText = Bound(nameof(MainViewModel.Summary), 13, Accent); AutomationProperties.SetAutomationId(summaryText, "service-state");
         summary.Children.Add(summaryText); Add(summary, Text("独立冷却 10 秒", 13, color: Secondary), column: 1);
-        Add(root, new Border { Background = Brush.Parse("#EAF5F5"), Child = summary }, row: 1);
+        Add(root, ThemedBorder(new Border { Child = summary }, "AppSummary"), row: 1);
 
         var proxy = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto"), ColumnDefinitions = new("*,Auto"), RowSpacing = 7 };
-        var proxyTitle = Bound(nameof(MainViewModel.ProxyTitle), 14, Teal); proxyTitle.FontWeight = FontWeight.SemiBold; AutomationProperties.SetAutomationId(proxyTitle, "proxy-status");
+        var proxyTitle = Bound(nameof(MainViewModel.ProxyTitle), 14, Accent); proxyTitle.FontWeight = FontWeight.SemiBold; AutomationProperties.SetAutomationId(proxyTitle, "proxy-status");
         proxy.Children.Add(proxyTitle); Add(proxy, Bound(nameof(MainViewModel.ProxyNumbers), 12, Secondary), column: 1);
         var selectedNode = Bound(nameof(MainViewModel.SelectedNode), 13);
         AutomationProperties.SetAutomationId(selectedNode, "selected-proxy-node"); Add(proxy, selectedNode, row: 1);
@@ -71,7 +70,7 @@ public sealed class MainWindow : Window
         regionSettings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(regionSettings, "region-settings");
         regionSettings.Click += async (_, _) => await new RegionSettingsWindow(model).ShowDialog(this); Add(proxy, regionSettings, row: 3, column: 1);
-        Add(root, new Border { Margin = new(24, 16, 24, 0), Padding = new(14), CornerRadius = new(10), Background = Brush.Parse("#F0F8F7"), BorderBrush = Brush.Parse("#C9E3E0"), BorderThickness = new(1), Child = proxy }, row: 2);
+        Add(root, ThemedBorder(new Border { Margin = new(24, 16, 24, 0), Padding = new(14), CornerRadius = new(10), BorderThickness = new(1), Child = proxy }, "AppPanel"), row: 2);
 
         var connection = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
         var status = Bound(nameof(MainViewModel.Connection), 12, Secondary); AutomationProperties.SetAutomationId(status, "connection-status");
@@ -93,7 +92,7 @@ public sealed class MainWindow : Window
         logHeading.Children.Add(Text("操作日志", 13, FontWeight.SemiBold));
         var openLog = new Button { Content = "打开日志文件", FontSize = 12, Padding = new(8, 4) }; openLog.Click += (_, _) => model.RevealLog();
         AutomationProperties.SetAutomationId(openLog, "open-log"); Add(logHeading, openLog, column: 1);
-        Add(root, new Border { BorderBrush = Brush.Parse("#DEE6EC"), BorderThickness = new(0, 1, 0, 0), Child = logHeading }, row: 5);
+        Add(root, ThemedBorder(new Border { BorderThickness = new(0, 1, 0, 0), Child = logHeading }), row: 5);
         var events = new ItemsControl { ItemsSource = model.Events, ItemTemplate = new FuncDataTemplate<Watchdog.Core.MonitorEvent>((value, _) =>
         {
             var row = new Grid { ColumnDefinitions = new("70,145,*"), Margin = new(0, 3) };
@@ -122,20 +121,30 @@ public sealed class MainWindow : Window
         Add(grid, Bound(nameof(AgentRowViewModel.State), 12, Secondary), column: 1);
         var detail = Bound(nameof(AgentRowViewModel.Detail), 12); detail.TextWrapping = TextWrapping.Wrap;
         detail.Bind(ToolTip.TipProperty, new Binding(nameof(AgentRowViewModel.Detail)));
-        Add(grid, new StackPanel { Spacing = 4, Children = { detail, Bound(nameof(AgentRowViewModel.Countdown), 11, Brush.Parse("#AD6A16")) } }, column: 2);
+        Add(grid, new StackPanel { Spacing = 4, Children = { detail, Bound(nameof(AgentRowViewModel.Countdown), 11, "AppWarning") } }, column: 2);
         Add(grid, Bound(nameof(AgentRowViewModel.Attempts), 13), column: 3);
-        return new Border { BorderThickness = new(0, 0, 0, 1), BorderBrush = Brush.Parse("#E5ECEF"), Child = grid };
+        return ThemedBorder(new Border { BorderThickness = new(0, 0, 0, 1), Child = grid });
     }
-    private void ShowDelays()
+    internal Window ShowDelays()
     {
         var window = new Window { Title = model.DelayTitle, Width = 530, Height = 330, MinWidth = 420, MinHeight = 240,
             Content = new StackPanel { Margin = new(20), Spacing = 12, Children = { Text(model.DelayTitle, 18, FontWeight.SemiBold),
                 new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("同地区全部并行测速；连续两次超过 800 ms 视为超时。", 12, color: Secondary) } } };
         window.ShowDialog(this);
+        return window;
     }
-    private static TextBlock Text(string value, double size, FontWeight? weight = null, IBrush? color = null) => new()
-    { Text = value, FontSize = size, FontWeight = weight ?? FontWeight.Normal, Foreground = color ?? Brush.Parse("#203644"), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-    private static TextBlock Bound(string property, double size, IBrush? color = null)
+    private static TextBlock Text(string value, double size, FontWeight? weight = null, string? color = null)
+    {
+        var text = new TextBlock { Text = value, FontSize = size, FontWeight = weight ?? FontWeight.Normal, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        AppThemeManager.Bind(text, TextBlock.ForegroundProperty, color ?? "AppForeground"); return text;
+    }
+    private static Border ThemedBorder(Border border, string? background = null)
+    {
+        AppThemeManager.Bind(border, Border.BorderBrushProperty, "AppBorder");
+        if (background is not null) AppThemeManager.Bind(border, Border.BackgroundProperty, background);
+        return border;
+    }
+    private static TextBlock Bound(string property, double size, string? color = null)
     { var text = Text("", size, color: color); text.Bind(TextBlock.TextProperty, new Binding(property)); return text; }
     private static void Add(Grid grid, Control child, int row = 0, int column = 0) { Grid.SetRow(child, row); Grid.SetColumn(child, column); grid.Children.Add(child); }
 }

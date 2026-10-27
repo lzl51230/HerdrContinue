@@ -23,16 +23,26 @@ public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartReg
             var warning = loaded.Warning;
             if (loaded.Settings.AutoStartEnabled && !entry.Enabled) warning ??= "系统自启动项不存在或应用位置已变化，请重新开启自启动。";
             if (!loaded.Settings.AutoStartEnabled && entry.Value is not null) warning ??= "存在未启用的系统启动项，可应用关闭设置将其移除。";
-            return Current = new(new(loaded.Settings.AutoStartEnabled && entry.Enabled), entry, warning);
+            return Current = new(loaded.Settings with { AutoStartEnabled = loaded.Settings.AutoStartEnabled && entry.Enabled }, entry, warning);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        { return Current = new(new(), new(null, false), "无法读取系统自启动项，自动运行已暂停：" + e.Message); }
+        { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false), "无法读取系统自启动项，自动运行已暂停：" + e.Message); }
     }
-    public async Task<AppSettingsStatus> ApplyAsync(AppSettings settings, CancellationToken ct = default)
+    public Task<AppSettingsStatus> ApplyAsync(AppSettings settings, CancellationToken ct = default) =>
+        ApplyChangeAsync(new(settings.Theme, settings.AutoStartEnabled), ct);
+    public async Task<AppSettingsStatus> ApplyChangeAsync(AppSettingsChange change, CancellationToken ct = default)
     {
         await gate.WaitAsync(ct);
         try
         {
+            _ = AppThemes.Id(change.Theme);
+            var loaded = await store.LoadAsync(ct);
+            var settings = loaded.Settings with { Theme = change.Theme, AutoStartEnabled = change.AutoStartEnabled ?? loaded.Settings.AutoStartEnabled };
+            if (change.AutoStartEnabled is null)
+            {
+                await store.SaveAsync(settings, ct);
+                return await ReloadAsync(CancellationToken.None);
+            }
             var previous = await registration.ReadAsync(ct);
             try
             {

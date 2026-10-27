@@ -16,6 +16,8 @@ public sealed class DesktopApplicationController
     private readonly AppSettingsController settings;
     private readonly LaunchOptions options;
     private readonly IEventSink log;
+    private readonly AppThemeManager themes;
+    private bool themeReady, showWhenReady;
     private readonly CancellationTokenSource lifetime = new();
     private readonly TrayIcon tray;
     private readonly NativeMenuItem toggle, status;
@@ -30,6 +32,11 @@ public sealed class DesktopApplicationController
         AppSettingsController settings, LaunchOptions options, AppInstance? instance, IEventSink log)
     {
         this.app = app; this.desktop = desktop; this.model = model; this.settings = settings; this.options = options; this.log = log;
+#if DEBUG
+        themes = new(app, (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") ?? "").StartsWith("theme", StringComparison.Ordinal) ? ThemeQaAutomation.Platform : null);
+#else
+        themes = new(app);
+#endif
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var show = new NativeMenuItem("打开主窗口"); show.Click += (_, _) => ShowMainWindow();
         var preferences = new NativeMenuItem("设置"); preferences.Click += async (_, _) => await ShowSettingsAsync();
@@ -48,7 +55,7 @@ public sealed class DesktopApplicationController
     }
     public void Start()
     {
-        if (!options.StartHidden) ShowMainWindow();
+        showWhenReady |= !options.StartHidden;
         startup = StartCoreAsync();
 #if DEBUG
         if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SESSION") is not null &&
@@ -61,6 +68,9 @@ public sealed class DesktopApplicationController
         try
         {
             var loaded = await settings.InitializeAsync(lifetime.Token);
+            themes.Commit(loaded.Settings.Theme);
+            themeReady = true;
+            if (showWhenReady) ShowMainWindow();
             await model.InitializeAsync();
             if (loaded.Warning is { } warning) Report(warning);
             if (IsExiting) return;
@@ -68,7 +78,11 @@ public sealed class DesktopApplicationController
             else await model.RefreshRegionsAsync(lifetime.Token);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (Exception e) { Report("应用初始化失败：" + e.Message); }
+        catch (Exception e)
+        {
+            Report("应用初始化失败：" + e.Message);
+            themeReady = true; if (showWhenReady) ShowMainWindow();
+        }
     }
     private void Report(string message)
     {
@@ -83,6 +97,7 @@ public sealed class DesktopApplicationController
     public void ShowMainWindow()
     {
         if (IsExiting) return;
+        if (!themeReady) { showWhenReady = true; return; }
         if (window is null)
         {
             window = new(model, () => IsExiting, ShowSettingsAsync, QuitAsync);
@@ -104,7 +119,8 @@ public sealed class DesktopApplicationController
         {
             await settings.InitializeAsync(lifetime.Token);
             if (IsExiting) return;
-            settingsWindow = new(settings);
+            themes.Commit(settings.Current.Settings.Theme);
+            settingsWindow = new(settings, themes);
             await settingsWindow.ShowDialog(window!);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -128,7 +144,7 @@ public sealed class DesktopApplicationController
         await stopping;
         await startup;
         model.PropertyChanged -= ModelChanged;
-        tray.Dispose(); lifetime.Dispose();
+        tray.Dispose(); themes.Dispose(); lifetime.Dispose();
 #if DEBUG
         QaStopped?.Invoke();
 #endif
@@ -138,7 +154,9 @@ public sealed class DesktopApplicationController
     private async Task RunQaAsync(string directory)
     {
         await startup;
-        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } scenario && scenario.StartsWith("startup", StringComparison.Ordinal))
+        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } scenario && scenario.StartsWith("theme", StringComparison.Ordinal))
+            await ThemeQaAutomation.RunAsync(this, model, settings, themes, directory, options);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } startupScenario && startupScenario.StartsWith("startup", StringComparison.Ordinal))
             await StartupQaAutomation.RunAsync(this, model, settings, directory, options);
         else if (window is not null) await QaAutomation.RunAsync(window, model, directory);
     }

@@ -68,6 +68,16 @@
 
 通用设置单独保存在地区设置同目录的 `app-settings.json`。文件损坏、启动项丢失或应用位置变化时暂停自动运行并提示；保存失败会尝试回滚系统登记。地区设置和通用设置分别保存。
 
+## 颜色主题
+
+“设置”中的“颜色主题”提供 Light Modern、Dark Modern、Light+、Dark+、Monokai 和 Solarized Dark 六套 VS Code 风格配色，以及默认的“跟随系统”。跟随系统会自动在现代浅色与现代深色之间切换；手动指定主题后保持所选配色。
+
+选择主题后立即预览主窗口和设置面板，点击“应用并保存”持久化，无需重启。取消或关闭设置面板恢复已保存主题；保存失败也恢复并显示错误。地区设置、测速结果和控件下拉菜单使用同一套主题，系统原生菜单保持系统外观。
+
+主题保存在 `app-settings.json` 的 `theme` 字段，旧设置缺少该字段时默认跟随系统。无法识别的主题值仅回退配色，不会关闭有效的自启动设置。只修改主题不重写系统登录启动项，也不改变续接服务或代理监控的运行状态。
+
+配色来源及调整见 [主题说明](docs/theme-colors.md)。隔离 Debug GUI 验收可使用 `scripts/qa-themes-macos.py`（`--app-bundle`、`--output-directory`）或在 Windows 交互桌面运行 `scripts/qa-themes-windows.ps1`（`-AppPath`、`-OutputDirectory`），两者均保存截图及 JSON 报告。
+
 ## 日志
 
 - macOS：`~/Library/Logs/HerdrAutoContinue/events.jsonl`
