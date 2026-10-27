@@ -59,8 +59,8 @@ function Launch([string]$Path) {
     return $p
 }
 function Close-Window($Window,$Process) {
-    $Window.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
-    if(-not $Process.WaitForExit(8000)){throw 'Window close did not terminate application'}
+    Invoke-Control $Window 'app-exit'
+    if(-not $Process.WaitForExit(8000)){throw 'Explicit quit did not terminate application'}
     if($Process.ExitCode -ne 0){throw "Application exited with $($Process.ExitCode)"}
 }
 try {
@@ -93,8 +93,8 @@ try {
     Capture $window '03-minimum-size.png'
     Close-Window $window $app
     Start-Sleep -Seconds 11
-    if(Test-Path $receipt){throw 'Window close failed to cancel pending submission'}
-    $result.closeCancelledPendingInput=$true
+    if(Test-Path $receipt){throw 'Explicit quit failed to cancel pending submission'}
+    $result.exitCancelledPendingInput=$true
     $app=Launch $AppPath;$window=Get-Window $app
     Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
     [QaNative]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle)|Out-Null
@@ -124,8 +124,8 @@ try {
     Invoke-Control $window 'service-toggle';Start-Sleep -Milliseconds 500;Close-Window $window $app
     $logPath=Join-Path $logDirectory 'events.jsonl'
     $last=Get-Content $logPath -Tail 1 -Encoding UTF8 | ConvertFrom-Json
-    if($last.message -notmatch '取消全部待发送任务'){throw 'Close did not stop monitor'}
-    $result.closeStoppedService=$true
+    if($last.message -notmatch '取消全部待发送任务'){throw 'Quit did not stop monitor'}
+    $result.exitStoppedService=$true
     $env:WATCHDOG_QA_SESSION=$null
     $env:DOTNET_ROOT=Join-Path $OutputDirectory 'missing-runtime'
     $release=Launch $ReleaseAppPath;$window=Get-Window $release

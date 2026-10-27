@@ -56,7 +56,7 @@ function Open-Settings($Process){
     }
     return Get-Window $Process '地区设置'
 }
-function Close-App($Process){(Get-Window $Process).GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close();if(-not $Process.WaitForExit(8000)){throw 'App did not stop'};if($Process.ExitCode -ne 0){throw "Exit code: $($Process.ExitCode)"}}
+function Close-App($Process){Invoke-Control (Get-Window $Process) 'app-exit';if(-not $Process.WaitForExit(8000)){throw 'App did not stop after explicit quit'};if($Process.ExitCode -ne 0){throw "Exit code: $($Process.ExitCode)"}}
 try{
     if($result.desktopSessionId -eq 0){throw 'QA must run on the interactive desktop'}
     $env:WATCHDOG_QA_SESSION='watchdog-qa-regions-'+[Guid]::NewGuid().ToString('N').Substring(0,8)

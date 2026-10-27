@@ -96,7 +96,6 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
         {
             uiError = await regionSettings.InitializeAsync(lifetime.Token);
             initialized = true; Changed("");
-            await RefreshRegionsAsync();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception e) { uiError = "地区设置初始化失败：" + e.Message; initialized = true; Changed(""); }
@@ -144,6 +143,15 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
         catch (Exception e) { uiError = "无法打开日志：" + e.Message; Changed(nameof(Connection)); }
     }
     public Task StopAsync() => engine.StopAsync();
+    public async Task StartServiceAsync()
+    {
+        await InitializeAsync();
+        if (lifetime.IsCancellationRequested) return;
+        busy = true; Changed(nameof(CanToggle));
+        try { await engine.StartAsync(cancellationToken: lifetime.Token); }
+        finally { busy = false; Changed(nameof(CanToggle)); }
+    }
+    public void SetError(string message) { uiError = message; Changed(nameof(Connection)); }
     public ValueTask DisposeAsync() => new(disposal ??= DisposeCoreAsync());
     private async Task DisposeCoreAsync()
     {

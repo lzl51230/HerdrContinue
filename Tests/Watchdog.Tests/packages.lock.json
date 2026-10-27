@@ -99,7 +99,7 @@
       "watchdog.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Watchdog.Core": "[1.2.0, )"
+          "Watchdog.Core": "[1.3.0, )"
         }
       }
     },

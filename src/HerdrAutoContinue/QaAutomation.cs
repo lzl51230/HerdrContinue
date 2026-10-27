@@ -20,8 +20,8 @@ internal static class QaAutomation
         var result = new Dictionary<string, object?>();
         window.Closed += (_, _) =>
         {
-            result["windowCloseStoppedService"] = !model.QaSnapshot.Running;
-            result["windowCloseStoppedProxy"] = model.QaSnapshot.Proxy.Phase == ProxyPhase.Stopped;
+            result["exitStoppedService"] = !model.QaSnapshot.Running;
+            result["exitStoppedProxy"] = model.QaSnapshot.Proxy.Phase == ProxyPhase.Stopped;
             result["closedCountdownsCleared"] = model.QaSnapshot.Rows.All(r => r.Deadline is null);
             File.WriteAllText(Path.Combine(directory, "result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
         };
@@ -31,7 +31,7 @@ internal static class QaAutomation
             result["initialStopped"] = !model.QaSnapshot.Running;
             if ((Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") ?? "").StartsWith("regions", StringComparison.Ordinal))
             {
-                await RunRegionsAsync(window, model, directory, result); window.Close(); return;
+                await RunRegionsAsync(window, model, directory, result); await window.ExitAsync(); return;
             }
             Capture(window, Path.Combine(directory, "stopped.png"));
             await model.ToggleAsync();
@@ -48,9 +48,9 @@ internal static class QaAutomation
                 result["stopClearedCountdowns"] = !model.QaSnapshot.Running && model.QaSnapshot.Rows.All(r => r.Deadline is null);
                 await model.ToggleAsync(); await Task.Delay(500);
             }
-            window.Close();
+            await window.ExitAsync();
         }
-        catch (Exception e) { result["error"] = e.ToString(); window.Close(); }
+        catch (Exception e) { result["error"] = e.ToString(); await window.ExitAsync(); }
     }
     private static async Task WaitAsync(Func<bool> condition, int seconds = 8)
     {

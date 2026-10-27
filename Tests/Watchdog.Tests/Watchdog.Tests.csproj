@@ -5,5 +5,6 @@
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
     <ProjectReference Include="../../src/Watchdog.Infrastructure/Watchdog.Infrastructure.csproj" />
+    <ProjectReference Include="../Watchdog.FakeAgent/Watchdog.FakeAgent.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

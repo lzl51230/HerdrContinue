@@ -13,29 +13,26 @@ public sealed class MainWindow : Window
 {
     private static readonly IBrush Teal = Brush.Parse("#087F8C"), Secondary = Brush.Parse("#667685");
     private readonly MainViewModel model;
-    private bool closing;
-    public MainWindow(MainViewModel model)
+    private readonly Func<Task> quit;
+    public MainWindow(MainViewModel model, Func<bool> isExiting, Func<Task> openSettings, Func<Task> quit)
     {
+        this.quit = quit;
         this.model = model; DataContext = model;
         Title = "Herdr Auto Continue"; Width = 1080; Height = 850; MinWidth = 900; MinHeight = 720;
         using (var icon = typeof(MainWindow).Assembly.GetManifestResourceStream("HerdrAutoContinue.AppIcon.ico"))
             if (icon is not null) Icon = new WindowIcon(icon);
         Background = Brush.Parse("#FAFCFD");
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Enter, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control), Command = model.ToggleCommand });
-        Content = BuildContent();
-        Opened += async (_, _) => await model.InitializeAsync();
-        Closing += async (_, e) =>
+        Content = BuildContent(openSettings);
+        Closing += (_, e) =>
         {
-            if (closing) return;
-            e.Cancel = true;
-            IsEnabled = false;
-            await model.DisposeAsync();
-            closing = true; Close();
+            if (isExiting()) return;
+            e.Cancel = true; Hide();
         };
-        Closed += async (_, _) => await model.DisposeAsync();
     }
+    internal Task ExitAsync() => quit();
 
-    private Control BuildContent()
+    private Control BuildContent(Func<Task> openSettings)
     {
         var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,170,Auto") };
         var heading = new Grid { ColumnDefinitions = new("64,*,Auto"), Margin = new(24, 20) };
@@ -46,7 +43,10 @@ public sealed class MainWindow : Window
         toggle.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(toggle, "service-toggle");
         toggle.Click += async (_, _) => await model.ToggleAsync();
-        Add(heading, toggle, column: 2);
+        var settings = new Button { Content = "设置", Height = 42, Padding = new(16, 6) };
+        settings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
+        AutomationProperties.SetAutomationId(settings, "app-settings"); settings.Click += async (_, _) => await openSettings();
+        Add(heading, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { settings, toggle } }, column: 2);
         Add(root, heading);
 
         var summary = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
@@ -103,8 +103,12 @@ public sealed class MainWindow : Window
         }) };
         AutomationProperties.SetAutomationId(events, "operation-log");
         Add(root, new ScrollViewer { Content = events, Margin = new(24, 0), HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, row: 6);
-        var footer = Text("ⓘ  关闭窗口即停止服务。正常完成、人工中断和等待确认的对话不会自动续接。", 12, color: Secondary);
-        footer.Margin = new(24, 12); footer.TextWrapping = TextWrapping.Wrap; Add(root, footer, row: 7);
+        var footer = new Grid { Margin = new(24, 12), ColumnDefinitions = new("*,Auto"), ColumnSpacing = 10 };
+        var help = Text("ⓘ  关闭窗口隐藏到托盘。正常完成、人工中断和等待确认的对话不会自动续接。", 12, color: Secondary);
+        help.TextWrapping = TextWrapping.Wrap; footer.Children.Add(help);
+        var exit = new Button { Content = "退出应用", FontSize = 12, Padding = new(8, 4) };
+        AutomationProperties.SetAutomationId(exit, "app-exit"); exit.Click += async (_, _) => await ExitAsync();
+        Grid.SetColumn(exit, 1); footer.Children.Add(exit); Add(root, footer, row: 7);
         return root;
     }
 

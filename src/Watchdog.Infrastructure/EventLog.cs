@@ -7,6 +7,7 @@ namespace Watchdog.Infrastructure;
 
 public static class AppPaths
 {
+    public static string AppSettingsPath => Path.Combine(Path.GetDirectoryName(SettingsPath)!, "app-settings.json");
     public static string SettingsPath => OperatingSystem.IsWindows()
         ? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HerdrAutoContinue", "settings.json")
         : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "HerdrAutoContinue", "settings.json");

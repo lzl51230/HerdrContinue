@@ -5,6 +5,15 @@ using Watchdog.Core;
 using Watchdog.Infrastructure;
 
 Console.InputEncoding = new UTF8Encoding(false); Console.OutputEncoding = new UTF8Encoding(false);
+if (args is ["--instance-qa", var scope] && scope.StartsWith("watchdog-qa-", StringComparison.Ordinal))
+{
+    using var instance = new AppInstance(scope);
+    if (!instance.IsPrimary) { await instance.NotifyAsync(); Console.WriteLine("secondary"); return 0; }
+    instance.SetActivationHandler(() => Console.WriteLine("activated"));
+    Console.WriteLine("primary");
+    await Console.In.ReadLineAsync();
+    return 0;
+}
 var address = Environment.GetEnvironmentVariable("HERDR_SOCKET_PATH");
 var pane = Environment.GetEnvironmentVariable("HERDR_PANE_ID");
 if (address is null || pane is null || !address.Contains("watchdog-qa-", StringComparison.Ordinal) || args.Length != 1) return 2;
