@@ -8,10 +8,10 @@ public sealed class ProxyPolicyTests
 {
     [Fact] public void JapaneseLeavesOnly()
     {
-        foreach (var name in new[] { JapanFast, "Japan 01", "JP-02", "Tokyo JP", "日本节点" }) Assert.True(new ClashNode(name).IsJapaneseLeaf, name);
-        foreach (var name in new[] { OtherNode, "SG-01", "notjp", "jpservice", "Tokyo", "剩余流量" }) Assert.False(new ClashNode(name).IsJapaneseLeaf, name);
-        foreach (var type in new[] { "Selector", "URLTest", "Fallback", "LoadBalance", "Relay", "DIRECT", "REJECT" }) Assert.False(new ClashNode(JapanFast, type).IsJapaneseLeaf);
-        Assert.False(new ClashNode(JapanFast, All: [OtherNode]).IsJapaneseLeaf); Assert.Equal(2, Clash().Candidates.Length);
+        foreach (var name in new[] { JapanFast, "Japan 01", "JP-02", "Tokyo JP", "日本节点" }) Assert.True((new ClashNode(name).Region?.Id == "JP"), name);
+        foreach (var name in new[] { OtherNode, "SG-01", "notjp", "jpservice", "Tokyo", "剩余流量" }) Assert.False((new ClashNode(name).Region?.Id == "JP"), name);
+        foreach (var type in new[] { "Selector", "URLTest", "Fallback", "LoadBalance", "Relay", "DIRECT", "REJECT" }) Assert.False((new ClashNode(JapanFast, type).Region?.Id == "JP"));
+        Assert.False((new ClashNode(JapanFast, All: [OtherNode]).Region?.Id == "JP")); Assert.Equal(3, Clash().Candidates.Length);
     }
     [Fact] public void RankingIgnoresOtherRegionsAndInvalidDelays()
     {

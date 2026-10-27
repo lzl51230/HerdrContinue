@@ -130,7 +130,7 @@ public sealed class LiveClashService(IClashEndpointDiscovery? discovery = null, 
     }
     public async Task SelectAsync(string node, ClashSnapshot snapshot, CancellationToken cancellationToken)
     {
-        if (!snapshot.CanSelect || !snapshot.Candidates.Any(c => c.Name == node)) throw new HerdrException("拒绝选择非日本节点或不适用的代理组");
+        if (!snapshot.CanSelect || !snapshot.Candidates.Any(c => c.Name == node)) throw new HerdrException("拒绝选择未知地区、非代理叶子节点或不适用的代理组");
         cancellationToken.ThrowIfCancellationRequested();
         var response = await http.RequestAsync(snapshot.Endpoint, HttpMethod.Put, "/proxies/GLOBAL", JsonSerializer.Serialize(new { name = node }), cancellationToken: cancellationToken);
         if (response.Status != 204) throw new HerdrException($"Clash 切换请求失败（HTTP {response.Status}）");

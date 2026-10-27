@@ -23,19 +23,29 @@ public sealed class ClashHttpTests
         var selected = OtherNode;
         await using var fixture = new HttpFixture(kind, request => Reply(request, () => selected, s => selected = s));
         var service = new LiveClashService(new FixedDiscovery(fixture.Endpoint)); var before = await service.SnapshotAsync(default);
-        Assert.Equal(OtherNode, before.Selected); Assert.Equal(2, before.Candidates.Length);
+        Assert.Equal(OtherNode, before.Selected); Assert.Equal(3, before.Candidates.Length);
         Assert.Equal(42, await service.DelayAsync(JapanFast, fixture.Endpoint, ProxyPolicy.TestUrls[0], default));
         await service.SelectAsync(JapanFast, before, default); Assert.Equal(JapanFast, (await service.SnapshotAsync(default)).Selected);
         var delay = Assert.Single(fixture.Requests, r => r.Resource.Contains("/delay?"));
         Assert.Contains(Uri.EscapeDataString(JapanFast), delay.Resource); Assert.Contains("expected=204", delay.Resource); Assert.Contains(Uri.EscapeDataString(ProxyPolicy.TestUrls[0]), delay.Resource);
     }
     [Theory, MemberData(nameof(TransportTests.Transports), MemberType = typeof(TransportTests))]
-    public async Task NonJapaneseAndGroupSelectionsAreRefusedBeforeHttp(EndpointKind kind)
+    public async Task UnknownAndGroupSelectionsAreRefusedBeforeHttp(EndpointKind kind)
     {
         await using var fixture = new HttpFixture(kind, request => Reply(request, () => OtherNode, _ => { }));
         var service = new LiveClashService(new FixedDiscovery(fixture.Endpoint)); var snapshot = await service.SnapshotAsync(default);
-        foreach (var node in new[] { OtherNode, "DIRECT", "自动选择" }) await Assert.ThrowsAsync<HerdrException>(() => service.SelectAsync(node, snapshot, default));
+        foreach (var node in new[] { "未知节点", "DIRECT", "自动选择" }) await Assert.ThrowsAsync<HerdrException>(() => service.SelectAsync(node, snapshot, default));
         Assert.DoesNotContain(fixture.Requests, r => r.Method == "PUT");
+    }
+    [Theory, MemberData(nameof(TransportTests.Transports), MemberType = typeof(TransportTests))]
+    public async Task KnownNonJapaneseLeafCanBeSelected(EndpointKind kind)
+    {
+        var selected = JapanFast;
+        await using var fixture = new HttpFixture(kind, request => Reply(request, () => selected, s => selected = s));
+        var service = new LiveClashService(new FixedDiscovery(fixture.Endpoint));
+        var snapshot = await service.SnapshotAsync(default); await service.SelectAsync(OtherNode, snapshot, default);
+        Assert.Equal(OtherNode, (await service.SnapshotAsync(default)).Selected);
+        Assert.Single(fixture.Requests, r => r.Method == "PUT");
     }
     [Theory, MemberData(nameof(TransportTests.Transports), MemberType = typeof(TransportTests))]
     public async Task ControllerIsRediscoveredAfterRestart(EndpointKind kind)

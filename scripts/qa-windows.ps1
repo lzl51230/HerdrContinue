@@ -83,7 +83,8 @@ try {
     Wait-Until { ((& $herdr --session $session agent list | ConvertFrom-Json).result.agents | Where-Object {$_.agent -eq 'codex' -and $_.agent_status -eq 'idle'}) -ne $null }
     $env:WATCHDOG_QA_SESSION=$session
     $app=Launch $AppPath;$window=Get-Window $app
-    Wait-Until { (Find-Control $window 'service-toggle').Current.Name -match '启动服务' }
+    Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
+    Wait-Until { (Find-Control $window 'service-toggle').Current.Name -match '启动服务' -and (Find-Control $window 'service-toggle').Current.IsEnabled }
     $result.initialStopped=$true;Capture $window '01-stopped.png'
     Invoke-Control $window 'service-toggle'
     Wait-Until { (Find-Control $window 'service-state').Current.Name -match '1 个冷却中' }
@@ -95,6 +96,7 @@ try {
     if(Test-Path $receipt){throw 'Window close failed to cancel pending submission'}
     $result.closeCancelledPendingInput=$true
     $app=Launch $AppPath;$window=Get-Window $app
+    Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
     [QaNative]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle)|Out-Null
     (Find-Control $window 'service-toggle').SetFocus()
     $watch=[Diagnostics.Stopwatch]::StartNew();[Windows.Forms.SendKeys]::SendWait('^{ENTER}')

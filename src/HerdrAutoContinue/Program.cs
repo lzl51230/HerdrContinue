@@ -28,18 +28,22 @@ public sealed class App : Application
             IHerdrService herdr = new LiveHerdrService();
             IClashService clash = new LiveClashService();
             var log = new JsonEventLog();
+            IRegionPreferencesStore preferencesStore = new RegionPreferencesStore();
 #if DEBUG
             // Test-only composition; release binaries cannot enter QA mode.
             if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SESSION") is { } qaSession)
             {
                 if (!qaSession.StartsWith("watchdog-qa-", StringComparison.Ordinal)) throw new InvalidOperationException("QA session must be isolated");
                 herdr = new FilteredHerdrService(herdr, qaSession);
-                clash = new HealthyQaClash();
-                log = new JsonEventLog(Path.Combine(Path.GetTempPath(), qaSession, "events.jsonl"));
+                var qaDirectory = Environment.GetEnvironmentVariable("WATCHDOG_QA_SETTINGS_DIR") ?? Path.Combine(Path.GetTempPath(), qaSession);
+                if (!Path.GetFileName(Path.GetFullPath(qaDirectory)).StartsWith("watchdog-qa-", StringComparison.Ordinal)) throw new InvalidOperationException("QA settings directory must be isolated");
+                clash = new QaClashService(Environment.GetEnvironmentVariable("WATCHDOG_QA_REGIONS") == "recovery", qaDirectory);
+                preferencesStore = new RegionPreferencesStore(Path.Combine(qaDirectory, "settings.json"));
+                log = new JsonEventLog(Path.Combine(qaDirectory, "events.jsonl"));
             }
 #endif
             var engine = new MonitorEngine(herdr, clash, log);
-            var model = new MainViewModel(engine, log.Path);
+            var model = new MainViewModel(engine, log.Path, preferencesStore);
             desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
             var window = new MainWindow(model);
             desktop.MainWindow = window;
@@ -58,14 +62,6 @@ public sealed class App : Application
         public Task<IReadOnlyList<Agent>> AgentsAsync(Session s, CancellationToken ct) => inner.AgentsAsync(s, ct);
         public Task<Observation> ObserveAsync(Agent a, Session s, bool refresh, CancellationToken ct) => inner.ObserveAsync(a, s, refresh, ct);
         public Task ResumeAsync(Observation o, CancellationToken ct) => inner.ResumeAsync(o, ct);
-    }
-    private sealed class HealthyQaClash : IClashService
-    {
-        public Task<ClashSnapshot> SnapshotAsync(CancellationToken ct) => Task.FromResult(new ClashSnapshot(new(EndpointKind.NamedPipe, "watchdog-qa-clash"), "global", 7890,
-            new Dictionary<string, ClashNode> { ["GLOBAL"] = new("GLOBAL", "Selector", "QA 日本01", ["QA 日本01"]), ["QA 日本01"] = new("QA 日本01") }));
-        public Task<ProxyProbe> ProbeProxyAsync(CancellationToken ct) => Task.FromResult(new ProxyProbe(true, 15));
-        public Task<int> DelayAsync(string n, LocalEndpoint e, string u, CancellationToken ct) => throw new InvalidOperationException("QA healthy proxy never tests nodes");
-        public Task SelectAsync(string n, ClashSnapshot s, CancellationToken ct) => throw new InvalidOperationException("QA healthy proxy never switches nodes");
     }
 #endif
 }

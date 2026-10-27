@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 namespace Watchdog.Core;
 
@@ -70,8 +69,8 @@ public sealed record ClashNode(string Name, string Type = "Vless", string? Now =
 {
     private static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { "direct", "reject", "rejectdrop", "pass", "compatible", "selector", "urltest", "fallback", "loadbalance", "relay" };
-    public bool IsJapaneseLeaf => All is null && !Excluded.Contains(Type) &&
-        Regex.IsMatch(Name, @"🇯🇵|日本|(?i:\bjapan\b|(?<![a-z0-9])jp(?![a-z0-9]))", RegexOptions.CultureInvariant);
+    [JsonIgnore] public bool IsProxyLeaf => All is null && !Excluded.Contains(Type);
+    [JsonIgnore] public ProxyRegion? Region => IsProxyLeaf ? RegionResolver.Resolve(Name) : null;
 }
 
 public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int MixedPort, IReadOnlyDictionary<string, ClashNode> Nodes)
@@ -79,18 +78,39 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
     public string? Selected => Nodes.GetValueOrDefault("GLOBAL")?.Now;
     public bool CanSelect => Mode.Equals("global", StringComparison.OrdinalIgnoreCase) && MixedPort == 7890 &&
         Nodes.GetValueOrDefault("GLOBAL")?.Type.Equals("selector", StringComparison.OrdinalIgnoreCase) == true;
-    public ClashNode[] Candidates => (Nodes.GetValueOrDefault("GLOBAL")?.All ?? [])
-        .Select(name => Nodes.GetValueOrDefault(name)).OfType<ClashNode>().Where(n => n.IsJapaneseLeaf)
+    public ClashNode[] Leaves => (Nodes.GetValueOrDefault("GLOBAL")?.All ?? [])
+        .Distinct(StringComparer.Ordinal).Select(name => Nodes.GetValueOrDefault(name)).OfType<ClashNode>().Where(n => n.IsProxyLeaf)
         .OrderBy(n => n.Name, StringComparer.Ordinal).ToArray();
+    public ClashNode[] Candidates => Leaves.Where(n => n.Region is not null).ToArray();
+    public RegionAvailability[] Regions => Candidates.GroupBy(n => n.Region!.Id).Select(g => new RegionAvailability(g.First().Region!, g.Count()))
+        .OrderBy(r => r.Region.Name, StringComparer.Ordinal).ToArray();
+    public string? CurrentRegionId => SelectionPath.LastOrDefault() is { } leaf ? Nodes.GetValueOrDefault(leaf)?.Region?.Id : null;
+    private string[] SelectionPath
+    {
+        get
+        {
+            List<string> path = []; HashSet<string> visited = [];
+            var name = Selected;
+            while (name is not null)
+            {
+                if (!visited.Add(name) || !Nodes.TryGetValue(name, out var node)) return [];
+                path.Add(name);
+                if (node.IsProxyLeaf) return path.ToArray();
+                name = node.Now;
+            }
+            return [];
+        }
+    }
     public bool HasSameConfiguration(ClashSnapshot other) => Endpoint == other.Endpoint && Mode == other.Mode &&
         MixedPort == other.MixedPort && Nodes.GetValueOrDefault("GLOBAL")?.Type == other.Nodes.GetValueOrDefault("GLOBAL")?.Type &&
         (Nodes.GetValueOrDefault("GLOBAL")?.All ?? []).SequenceEqual(other.Nodes.GetValueOrDefault("GLOBAL")?.All ?? []) &&
-        Candidates.SequenceEqual(other.Candidates);
-    public bool HasSameSelectionContext(ClashSnapshot other) => HasSameConfiguration(other) && Selected == other.Selected;
+        Nodes.Count == other.Nodes.Count && Nodes.All(pair => other.Nodes.TryGetValue(pair.Key, out var node) && pair.Value.Name == node.Name &&
+            pair.Value.Type == node.Type && (pair.Value.All ?? []).SequenceEqual(node.All ?? []));
+    public bool HasSameSelectionContext(ClashSnapshot other) => HasSameConfiguration(other) && Selected == other.Selected && SelectionPath.SequenceEqual(other.SelectionPath);
 }
 
 public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null);
-public sealed record NodeDelay(string Name, int Milliseconds);
+public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null);
 public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, Retrying, Unavailable }
 public sealed record ProxyStatus
 {
@@ -104,6 +124,13 @@ public sealed record ProxyStatus
     public int Round { get; init; }
     public double? NextCheck { get; init; }
     public IReadOnlyList<NodeDelay> Delays { get; init; } = [];
+    public IReadOnlyList<RegionAvailability> Regions { get; init; } = [];
+    public IReadOnlyList<string> RegionPriority { get; init; } = ["JP"];
+    public string? CurrentRegionId { get; init; }
+    public string? TestingRegionId { get; init; }
+    public int UnknownNodeCount { get; init; }
+    public bool CatalogueLoaded { get; init; }
+    public string? CatalogueError { get; init; }
     public bool PermitsAgent(double now) => Phase == ProxyPhase.Healthy && HealthyAt is { } at && now >= at && now - at <= 20;
 }
 

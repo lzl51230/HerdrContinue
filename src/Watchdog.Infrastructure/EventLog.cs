@@ -7,6 +7,9 @@ namespace Watchdog.Infrastructure;
 
 public static class AppPaths
 {
+    public static string SettingsPath => OperatingSystem.IsWindows()
+        ? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HerdrAutoContinue", "settings.json")
+        : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "HerdrAutoContinue", "settings.json");
     public static string LogPath => OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HerdrAutoContinue", "Logs", "events.jsonl")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Logs", "HerdrAutoContinue", "events.jsonl");

@@ -23,12 +23,13 @@ public sealed class MainWindow : Window
         Background = Brush.Parse("#FAFCFD");
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Enter, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control), Command = model.ToggleCommand });
         Content = BuildContent();
+        Opened += async (_, _) => await model.InitializeAsync();
         Closing += async (_, e) =>
         {
             if (closing) return;
             e.Cancel = true;
             IsEnabled = false;
-            await model.StopAsync();
+            await model.DisposeAsync();
             closing = true; Close();
         };
         Closed += async (_, _) => await model.DisposeAsync();
@@ -39,7 +40,7 @@ public sealed class MainWindow : Window
         var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,170,Auto") };
         var heading = new Grid { ColumnDefinitions = new("64,*,Auto"), Margin = new(24, 20) };
         heading.Children.Add(new TextBlock { Text = "↻", FontSize = 47, Foreground = Teal, VerticalAlignment = VerticalAlignment.Center });
-        Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Text("代理故障自动切换日本节点，恢复后续接 agent", 13, color: Secondary) } }, column: 1);
+        Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Text("按地区优先级恢复代理，连通后续接 agent", 13, color: Secondary) } }, column: 1);
         var toggle = new Button { Width = 132, Height = 42, Background = Teal, Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center };
         toggle.Bind(ContentControl.ContentProperty, new Binding(nameof(MainViewModel.ToggleText)));
         toggle.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
@@ -53,15 +54,23 @@ public sealed class MainWindow : Window
         summary.Children.Add(summaryText); Add(summary, Text("独立冷却 10 秒", 13, color: Secondary), column: 1);
         Add(root, new Border { Background = Brush.Parse("#EAF5F5"), Child = summary }, row: 1);
 
-        var proxy = new Grid { RowDefinitions = new("Auto,Auto,Auto"), ColumnDefinitions = new("*,Auto"), RowSpacing = 7 };
+        var proxy = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto"), ColumnDefinitions = new("*,Auto"), RowSpacing = 7 };
         var proxyTitle = Bound(nameof(MainViewModel.ProxyTitle), 14, Teal); proxyTitle.FontWeight = FontWeight.SemiBold; AutomationProperties.SetAutomationId(proxyTitle, "proxy-status");
         proxy.Children.Add(proxyTitle); Add(proxy, Bound(nameof(MainViewModel.ProxyNumbers), 12, Secondary), column: 1);
-        Add(proxy, Bound(nameof(MainViewModel.SelectedNode), 13), row: 1);
+        var selectedNode = Bound(nameof(MainViewModel.SelectedNode), 13);
+        AutomationProperties.SetAutomationId(selectedNode, "selected-proxy-node"); Add(proxy, selectedNode, row: 1);
         var results = new Button { Content = "测速结果", Padding = new(8, 3), FontSize = 12 };
         results.Bind(IsVisibleProperty, new Binding(nameof(MainViewModel.HasDelays))); AutomationProperties.SetAutomationId(results, "measurement-results");
         results.Click += (_, _) => ShowDelays(); Add(proxy, results, row: 1, column: 1);
         var proxyDetail = Bound(nameof(MainViewModel.ProxyDetail), 12, Secondary); proxyDetail.TextWrapping = TextWrapping.Wrap;
         Add(proxy, proxyDetail, row: 2); Add(proxy, Bound(nameof(MainViewModel.ProxyCountdown), 12, Secondary), row: 2, column: 1);
+        var regionOrder = Bound(nameof(MainViewModel.RegionOrder), 12, Secondary);
+        AutomationProperties.SetAutomationId(regionOrder, "region-order");
+        regionOrder.Bind(ToolTip.TipProperty, new Binding(nameof(MainViewModel.RegionOrder))); Add(proxy, regionOrder, row: 3);
+        var regionSettings = new Button { Content = "地区设置", Padding = new(8, 3), FontSize = 12 };
+        regionSettings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
+        AutomationProperties.SetAutomationId(regionSettings, "region-settings");
+        regionSettings.Click += async (_, _) => await new RegionSettingsWindow(model).ShowDialog(this); Add(proxy, regionSettings, row: 3, column: 1);
         Add(root, new Border { Margin = new(24, 16, 24, 0), Padding = new(14), CornerRadius = new(10), Background = Brush.Parse("#F0F8F7"), BorderBrush = Brush.Parse("#C9E3E0"), BorderThickness = new(1), Child = proxy }, row: 2);
 
         var connection = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
