@@ -17,6 +17,7 @@ internal static class Program
         try
         {
 #if DEBUG
+            LoadQaBundleSettings();
             for (var i = 0; i + 1 < args.Length; i++)
             {
                 if (args[i] == "--qa-session") Environment.SetEnvironmentVariable("WATCHDOG_QA_SESSION", args[++i]);
@@ -56,7 +57,25 @@ internal static class Program
         finally { Instance = null; }
     }
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect()
-        .With(new MacOSPlatformOptions { ShowInDock = !Options.StartHidden }).LogToTrace();
+        .With(new MacOSPlatformOptions { ShowInDock = false }).LogToTrace();
+#if DEBUG
+    private static void LoadQaBundleSettings()
+    {
+        if (!OperatingSystem.IsMacOS() || Environment.ProcessPath is not { } executable) return;
+        var contents = Directory.GetParent(Path.GetDirectoryName(executable)!)?.FullName;
+        if (contents is null) return;
+        var file = Path.Combine(contents, "Resources", "watchdog-qa.json");
+        if (!File.Exists(file)) return;
+        var info = System.Xml.Linq.XDocument.Load(Path.Combine(contents, "Info.plist"));
+        var bundleId = info.Descendants("key").SingleOrDefault(k => k.Value == "CFBundleIdentifier")?.NextNode as System.Xml.Linq.XElement;
+        if (bundleId?.Value.StartsWith("local.alex.herdr-auto-continue.qa.", StringComparison.Ordinal) != true)
+            throw new InvalidOperationException("QA bundle must have an isolated identifier");
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
+        foreach (var property in document.RootElement.EnumerateObject())
+            if (property.Name.StartsWith("WATCHDOG_QA_", StringComparison.Ordinal) && Environment.GetEnvironmentVariable(property.Name) is null)
+                Environment.SetEnvironmentVariable(property.Name, property.Value.GetString());
+    }
+#endif
 }
 
 public sealed class App : Application
@@ -70,6 +89,7 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            MacLaunchContext.Install(Program.Options);
             IHerdrService herdr = new LiveHerdrService();
             IClashService clash = new LiveClashService();
             var log = new JsonEventLog();
@@ -97,8 +117,10 @@ public sealed class App : Application
             var registrationName = qaSession is null ? "HerdrAutoContinue" : "HerdrAutoContinue-QA-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(qaSession)))[..12];
             IAutoStartRegistration registration = OperatingSystem.IsWindows()
                 ? new WindowsAutoStartRegistration(command, registrationName)
-                : new MacAutoStartRegistration(command, label: qaSession is null ? "local.alex.herdr-auto-continue" : "local.alex." + registrationName,
-                    logPath: qaDirectory is null ? null : Path.Combine(qaDirectory, "startup.log"));
+                : OperatingSystem.IsMacOS() ? new MacLoginItemRegistration(command, new MacAppServices(),
+                    legacyPath: qaDirectory is null ? null : Path.Combine(qaDirectory, "legacy-login.plist"),
+                    legacyLabel: qaSession is null ? "local.alex.herdr-auto-continue" : "local.alex." + registrationName)
+                : throw new PlatformNotSupportedException("当前系统不支持桌面登录项。");
             var controller = new AppSettingsController(settings, registration);
             var model = new MainViewModel(new MonitorEngine(herdr, clash, log), log.Path, regions);
             var host = new DesktopApplicationController(this, desktop, model, controller, Program.Options, Program.Instance, log);

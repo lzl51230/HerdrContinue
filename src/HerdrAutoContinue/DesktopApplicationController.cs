@@ -14,7 +14,7 @@ public sealed class DesktopApplicationController
     private readonly IClassicDesktopStyleApplicationLifetime desktop;
     private readonly MainViewModel model;
     private readonly AppSettingsController settings;
-    private readonly LaunchOptions options;
+    private LaunchOptions options;
     private readonly IEventSink log;
     private readonly AppThemeManager themes;
     private bool themeReady, showWhenReady;
@@ -55,7 +55,6 @@ public sealed class DesktopApplicationController
     }
     public void Start()
     {
-        showWhenReady |= !options.StartHidden;
         startup = StartCoreAsync();
 #if DEBUG
         if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SESSION") is not null &&
@@ -67,6 +66,8 @@ public sealed class DesktopApplicationController
     {
         try
         {
+            options = await MacLaunchContext.ResolveAsync(options, lifetime.Token);
+            showWhenReady |= !options.StartHidden;
             var loaded = await settings.InitializeAsync(lifetime.Token);
             themes.Commit(loaded.Settings.Theme);
             themeReady = true;
@@ -104,6 +105,7 @@ public sealed class DesktopApplicationController
             desktop.MainWindow = window;
         }
         app.TryGetFeature<IActivatableLifetime>()?.TryLeaveBackground();
+        MacLaunchContext.Reveal();
         window.Show();
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
@@ -145,6 +147,7 @@ public sealed class DesktopApplicationController
         await startup;
         model.PropertyChanged -= ModelChanged;
         tray.Dispose(); themes.Dispose(); lifetime.Dispose();
+        MacLaunchContext.Restore();
 #if DEBUG
         QaStopped?.Invoke();
 #endif
@@ -154,7 +157,9 @@ public sealed class DesktopApplicationController
     private async Task RunQaAsync(string directory)
     {
         await startup;
-        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } scenario && scenario.StartsWith("theme", StringComparison.Ordinal))
+        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } nativeScenario && nativeScenario.StartsWith("native-", StringComparison.Ordinal))
+            await NativeLoginQaAutomation.RunAsync(this, model, settings, directory, options);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } scenario && scenario.StartsWith("theme", StringComparison.Ordinal))
             await ThemeQaAutomation.RunAsync(this, model, settings, themes, directory, options);
         else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } startupScenario && startupScenario.StartsWith("startup", StringComparison.Ordinal))
             await StartupQaAutomation.RunAsync(this, model, settings, directory, options);

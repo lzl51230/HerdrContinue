@@ -85,7 +85,7 @@ public sealed class AppStartupTests
         Directory.CreateDirectory(Path.GetDirectoryName(executable)!); await File.WriteAllTextAsync(executable, "fixture");
         var path = Path.Combine(root, "LaunchAgents", "qa.plist");
         var command = new AutoStartCommand(executable, ["--autostart", "--qa-settings-dir", root]);
-        var registration = new MacAutoStartRegistration(command, path, "watchdog-qa", Path.Combine(root, "logs", "startup.log"));
+        var registration = new LegacyMacAutoStartRegistration(command, path, "watchdog-qa", Path.Combine(root, "logs", "startup.log"));
         try
         {
             await registration.SetEnabledAsync(true); Assert.True((await registration.ReadAsync()).Enabled);

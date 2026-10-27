@@ -2,16 +2,30 @@ using Watchdog.Core;
 
 namespace Watchdog.Infrastructure;
 
-public sealed record AppSettingsStatus(AppSettings Settings, AutoStartEntry Registration, string? Warning = null);
+public sealed record AppSettingsStatus(AppSettings Settings, AutoStartEntry Registration, string? Warning = null)
+{
+    public AppSettings RequestedSettings { get; init; } = Settings;
+}
 public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartRegistration registration)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     public AppSettingsStatus Current { get; private set; } = new(new(), new(null, false));
     public string? AvailabilityError => registration.AvailabilityError;
+    public bool CanOpenSettings => registration.CanOpenSettings;
+    public void OpenSettings() => registration.OpenSettings();
+    public void PromptForApproval() => registration.PromptForApproval();
     public async Task<AppSettingsStatus> InitializeAsync(CancellationToken ct = default)
     {
         await gate.WaitAsync(ct);
-        try { return await ReloadAsync(ct); }
+        try
+        {
+            string? migrationWarning = null;
+            try { await registration.MigrateLegacyAsync((await store.LoadAsync(ct)).Settings.AutoStartEnabled, ct); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            { migrationWarning = "旧启动项迁移失败：" + e.Message; }
+            var status = await ReloadAsync(ct);
+            return Current = migrationWarning is null ? status : status with { Warning = migrationWarning };
+        }
         finally { gate.Release(); }
     }
     private async Task<AppSettingsStatus> ReloadAsync(CancellationToken ct)
@@ -21,12 +35,14 @@ public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartReg
         {
             var entry = await registration.ReadAsync(ct);
             var warning = loaded.Warning;
-            if (loaded.Settings.AutoStartEnabled && !entry.Enabled) warning ??= "系统自启动项不存在或应用位置已变化，请重新开启自启动。";
-            if (!loaded.Settings.AutoStartEnabled && entry.Value is not null) warning ??= "存在未启用的系统启动项，可应用关闭设置将其移除。";
-            return Current = new(loaded.Settings with { AutoStartEnabled = loaded.Settings.AutoStartEnabled && entry.Enabled }, entry, warning);
+            if (entry.Status == AutoStartState.RequiresApproval) warning ??= "登录项已登记，等待系统许可；请在系统登录项中允许此应用。";
+            else if (loaded.Settings.AutoStartEnabled && !entry.Enabled) warning ??= "系统自启动项已关闭、不可用或应用位置已变化，请检查后重新开启。";
+            if (!loaded.Settings.AutoStartEnabled && entry.Value is not null && entry.Status is not (AutoStartState.NotFound or AutoStartState.Unavailable))
+                warning ??= "系统仍有启动登记，应用未开启自动运行；请在系统启动项中检查或移除。";
+            return Current = new(loaded.Settings with { AutoStartEnabled = loaded.Settings.AutoStartEnabled && entry.Enabled }, entry, warning) { RequestedSettings = loaded.Settings };
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false), "无法读取系统自启动项，自动运行已暂停：" + e.Message); }
+        { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false, State: AutoStartState.Unavailable), "无法读取系统自启动项，自动运行已暂停：" + e.Message) { RequestedSettings = loaded.Settings }; }
     }
     public Task<AppSettingsStatus> ApplyAsync(AppSettings settings, CancellationToken ct = default) =>
         ApplyChangeAsync(new(settings.Theme, settings.AutoStartEnabled), ct);

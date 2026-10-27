@@ -2,6 +2,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>HerdrAutoContinue</AssemblyName>
+    <AssemblyTitle>Herdr Auto Continue</AssemblyTitle>
+    <Product>Herdr Auto Continue</Product>
     <PublishTrimmed>false</PublishTrimmed>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -13,4 +15,16 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <ProjectReference Include="../Watchdog.Infrastructure/Watchdog.Infrastructure.csproj" />
   </ItemGroup>
+  <PropertyGroup>
+    <MacNativeOutput>$(BaseIntermediateOutputPath)$(Configuration)/native/libHerdrMacIntegration.dylib</MacNativeOutput>
+    <MacNativeDefines Condition="'$(Configuration)' == 'Debug'">-DHDAC_QA</MacNativeDefines>
+  </PropertyGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-'))">
+    <None Include="$(MacNativeOutput)" Link="libHerdrMacIntegration.dylib" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildMacIntegration" BeforeTargets="AssignTargetPaths" Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-'))"
+          Inputs="../../native/macos/HerdrMacIntegration.m;$(MSBuildProjectFullPath)" Outputs="$(MacNativeOutput)">
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(MacNativeOutput)'))" />
+    <Exec Command="xcrun clang -dynamiclib -fobjc-arc -Wall -Wextra -Werror $(MacNativeDefines) -mmacosx-version-min=14.0 -arch arm64 -arch x86_64 -framework AppKit -framework ServiceManagement -framework Carbon &quot;$(MSBuildProjectDirectory)/../../native/macos/HerdrMacIntegration.m&quot; -o &quot;$(MacNativeOutput)&quot;" />
+  </Target>
 </Project>

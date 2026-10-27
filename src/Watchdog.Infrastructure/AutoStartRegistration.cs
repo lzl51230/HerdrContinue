@@ -6,13 +6,21 @@ using Watchdog.Core;
 
 namespace Watchdog.Infrastructure;
 
-public sealed record AutoStartEntry(object? Value, bool Enabled, RegistryValueKind? Kind = null);
+public enum AutoStartState { NotRegistered, Enabled, RequiresApproval, NotFound, Unavailable }
+public sealed record AutoStartEntry(object? Value, bool Enabled, RegistryValueKind? Kind = null, AutoStartState? State = null)
+{
+    public AutoStartState Status => State ?? (Enabled ? AutoStartState.Enabled : AutoStartState.NotRegistered);
+}
 public interface IAutoStartRegistration
 {
     string? AvailabilityError { get; }
     Task<AutoStartEntry> ReadAsync(CancellationToken ct = default);
     Task SetEnabledAsync(bool enabled, CancellationToken ct = default);
     Task RestoreAsync(AutoStartEntry entry, CancellationToken ct = default);
+    Task MigrateLegacyAsync(bool requested, CancellationToken ct = default) => Task.CompletedTask;
+    bool CanOpenSettings => false;
+    void OpenSettings() { }
+    void PromptForApproval() { }
 }
 
 public sealed record AutoStartCommand(string Executable, IReadOnlyList<string> Arguments, string? AvailabilityError = null)
@@ -81,7 +89,7 @@ public sealed class WindowsAutoStartRegistration(AutoStartCommand command, strin
     }
 }
 
-public sealed class MacAutoStartRegistration(AutoStartCommand command, string? path = null,
+public sealed class LegacyMacAutoStartRegistration(AutoStartCommand command, string? path = null,
     string label = "local.alex.herdr-auto-continue", string? logPath = null) : IAutoStartRegistration
 {
     private readonly string path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "LaunchAgents", label + ".plist");

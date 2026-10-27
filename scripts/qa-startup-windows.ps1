@@ -1,6 +1,9 @@
-﻿param([Parameter(Mandatory=$true)][string]$AppPath,[Parameter(Mandatory=$true)][string]$OutputDirectory,[string]$FakeAgentPath)
+﻿param([Parameter(Mandatory=$true)][string]$AppPath,[Parameter(Mandatory=$true)][string]$OutputDirectory,[string]$FakeAgentPath,[switch]$VerifySystemLists)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+$bytes=[IO.File]::ReadAllBytes((Join-Path (Split-Path $AppPath) 'HerdrAutoContinue.dll'))
+$unicode=[Text.Encoding]::Unicode
+if(-not ($unicode.GetString($bytes).Contains('WATCHDOG_QA_SESSION') -or $unicode.GetString($bytes,1,$bytes.Length-1).Contains('WATCHDOG_QA_SESSION'))){throw 'Use an isolated Debug QA build'}
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $token=[Guid]::NewGuid().ToString('N').Substring(0,6)
 $scope='watchdog-qa-s'+$token
@@ -15,6 +18,17 @@ $key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $result=[ordered]@{session=$scope;desktopSessionId=(Get-Process -Id $PID).SessionId;stages=@{}}
 $processes=[Collections.Generic.List[Diagnostics.Process]]::new()
 $server=$null;$herdr=$null
+function Verify-Lists([string]$Stage){
+ if(-not $VerifySystemLists){return}
+ $request=Join-Path $OutputDirectory ($Stage+'-list-request.json')
+ $response=Join-Path $OutputDirectory ($Stage+'-list-result.json')
+ [IO.File]::WriteAllText($request,(@{stage=$Stage;name=$name;appPath=$app}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+ $watch=[Diagnostics.Stopwatch]::StartNew()
+ while(-not (Test-Path $response)){if($watch.Elapsed.TotalSeconds -gt 120){throw 'System list verifier did not respond'};Start-Sleep -Milliseconds 200}
+ $verification=Get-Content $response -Raw -Encoding UTF8|ConvertFrom-Json
+ if(-not $verification.success){throw ($verification|ConvertTo-Json -Depth 6)}
+ $result[$Stage+'SystemLists']=$verification
+}
 function Wait-Condition([scriptblock]$Condition){
  $watch=[Diagnostics.Stopwatch]::StartNew()
  while($watch.Elapsed.TotalSeconds -lt 15){if(& $Condition){return};Start-Sleep -Milliseconds 100}
@@ -79,6 +93,7 @@ try {
   [IO.File]::WriteAllText((Join-Path $state 'expect-agent'),'')
  }
  Run-Stage 'startup-enable'
+ Verify-Lists 'enabled'
  Run-Stage 'startup-system' $true $true
  if($FakeAgentPath){
   $receipt=@(Get-Content (Join-Path $state 'receipt.jsonl') -Encoding UTF8)
@@ -90,6 +105,7 @@ try {
  Run-Stage 'startup-os-shutdown'
  Run-Stage 'startup-disable'
  if(Get-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue){throw 'Startup entry still exists after disabling'}
+ Verify-Lists 'removed'
  Run-Stage 'startup-off'
  Run-Stage 'startup-off-hidden' $true
  $result.success=$true
@@ -98,6 +114,7 @@ finally {
  foreach($p in $processes){if(-not $p.HasExited){$p.Kill();$p.WaitForExit()}}
  if($server){try{& $herdr session stop $scope --json|Out-Null;& $herdr session delete $scope --json|Out-Null}catch{};if(-not $server.HasExited){$server.Kill()}}
  Remove-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue
+ Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name $name -ErrorAction SilentlyContinue
  if(Test-Path $state){Copy-Item $state (Join-Path $OutputDirectory 'state') -Recurse -Force}
  [IO.File]::WriteAllText((Join-Path $OutputDirectory 'result.json'),($result|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
  Remove-Item $appDirectory,$state -Recurse -Force -ErrorAction SilentlyContinue
