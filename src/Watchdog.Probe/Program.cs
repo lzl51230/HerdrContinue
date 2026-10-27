@@ -12,7 +12,7 @@ try
         var probe = await clash.ProbeProxyAsync(CancellationToken.None);
         Console.WriteLine($"Clash: mode={snapshot.Mode}, mixed-port={snapshot.MixedPort}, selected={snapshot.Selected}, regions={snapshot.Regions.Length}, recognized leaves={snapshot.Candidates.Length}, unknown={snapshot.Leaves.Length - snapshot.Candidates.Length}");
         foreach (var region in snapshot.Regions) Console.WriteLine($"  {region.Region.Id} {region.Region.Name}: {region.NodeCount}");
-        Console.WriteLine($"Proxy reachable={probe.Healthy}, latency={probe.LatencyMs} ms; no node testing or switching performed");
+        Console.WriteLine($"Proxy reachable={probe.Healthy}, latency={probe.LatencyMs} ms, failure={probe.Failure}; no node testing or switching performed");
     }
     else if (args.Contains("--monitor-test"))
     {

@@ -109,7 +109,8 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
     public bool HasSameSelectionContext(ClashSnapshot other) => HasSameConfiguration(other) && Selected == other.Selected && SelectionPath.SequenceEqual(other.SelectionPath);
 }
 
-public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null);
+public enum ProxyProbeFailure { None, RequestFailed, SlowTimeout }
+public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null, ProxyProbeFailure Failure = ProxyProbeFailure.None);
 public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null);
 public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, Retrying, Unavailable }
 public sealed record ProxyStatus
@@ -144,9 +145,10 @@ public interface IClashService
 
 public static class ProxyPolicy
 {
+    public const int MaximumLatencyMs = 800;
     public static readonly string[] TestUrls = ["https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204"];
     public static NodeDelay[] Ranked(IEnumerable<NodeDelay> delays, ISet<string> allowed) => delays
-        .Where(d => allowed.Contains(d.Name) && d.Milliseconds is > 0 and <= 5000)
+        .Where(d => allowed.Contains(d.Name) && d.Milliseconds is > 0 and <= MaximumLatencyMs)
         .OrderBy(d => d.Milliseconds).ThenBy(d => d.Name, StringComparer.Ordinal).ToArray();
 }
 

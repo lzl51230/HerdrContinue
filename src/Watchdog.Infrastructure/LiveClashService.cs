@@ -59,12 +59,13 @@ public sealed class LocalHttpTransport(ILocalConnectionFactory? connections = nu
 }
 
 public sealed class LiveClashService(IClashEndpointDiscovery? discovery = null, ILocalConnectionFactory? connections = null,
-    Uri? proxyAddress = null, IReadOnlyList<string>? probeUrls = null) : IClashService
+    Uri? proxyAddress = null, IReadOnlyList<string>? probeUrls = null, TimeProvider? timeProvider = null) : IClashService
 {
     private readonly IClashEndpointDiscovery discovery = discovery ?? new ClashEndpointDiscovery();
     private readonly LocalHttpTransport http = new(connections);
     private readonly Uri proxyAddress = proxyAddress ?? new Uri("http://127.0.0.1:7890");
     private readonly IReadOnlyList<string> probeUrls = probeUrls ?? ProxyPolicy.TestUrls;
+    private readonly TimeProvider timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<ClashSnapshot> SnapshotAsync(CancellationToken cancellationToken)
     {
@@ -98,26 +99,31 @@ public sealed class LiveClashService(IClashEndpointDiscovery? discovery = null, 
             ConnectTimeout = TimeSpan.FromSeconds(3), PooledConnectionLifetime = TimeSpan.Zero
         };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
-        var tasks = probeUrls.Select(async url =>
+        var tasks = probeUrls.Select(url => LatencyPolicy.CheckAsync(async ct =>
         {
-            var start = System.Diagnostics.Stopwatch.GetTimestamp();
-            try
-            {
-                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, round.Token);
-                return new ProxyProbe(response.StatusCode == HttpStatusCode.NoContent, (int)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
-            }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException) { return new ProxyProbe(false); }
-        }).ToList();
+            var start = timeProvider.GetTimestamp();
+            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (response.StatusCode != HttpStatusCode.NoContent) throw new HerdrException($"代理探测失败（HTTP {(int)response.StatusCode}）");
+            return timeProvider.GetElapsedTime(start).TotalMilliseconds;
+        }, round.Token)).ToList();
         var all = tasks.ToArray();
-        ProxyProbe result = new(false);
-        while (tasks.Count > 0)
+        ProxyProbe result = new(false, Failure: ProxyProbeFailure.RequestFailed);
+        try
         {
-            var finished = await Task.WhenAny(tasks); tasks.Remove(finished);
-            var probe = await finished;
-            if (!probe.Healthy) continue;
-            result = probe; round.Cancel(); break;
+            while (tasks.Count > 0)
+            {
+                var finished = await Task.WhenAny(tasks); tasks.Remove(finished);
+                var probe = await finished;
+                if (probe.Healthy) { result = probe; break; }
+                if (probe.Failure == ProxyProbeFailure.SlowTimeout) result = probe;
+            }
         }
-        await Task.WhenAll(all);
+        finally
+        {
+            await round.CancelAsync();
+            try { await Task.WhenAll(all); }
+            catch (OperationCanceledException) when (round.IsCancellationRequested) { }
+        }
         cancellationToken.ThrowIfCancellationRequested();
         return result;
     }

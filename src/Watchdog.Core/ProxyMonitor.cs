@@ -149,7 +149,9 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             if (!Active(token)) return;
             failures = probe.Healthy ? 0 : failures + 1;
             if (probe.Healthy) Healthy(token, probe);
-            else Phase(token, ProxyPhase.Suspect, $"代理请求失败；暂停 agent 续接（连续 {failures} 轮）");
+            else Phase(token, ProxyPhase.Suspect, probe.Failure == ProxyProbeFailure.SlowTimeout
+                ? $"当前节点连续两次延迟超过 {ProxyPolicy.MaximumLatencyMs} ms，视为节点超时；暂停 agent 续接并开始恢复"
+                : $"代理请求失败；暂停 agent 续接（连续 {failures} 轮）");
             var (snapshot, error) = await configTask;
             if (!Active(token)) return;
             if (snapshot is not null) Apply(token, snapshot);
@@ -160,7 +162,7 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
                 else if (snapshot?.CanSelect == false) Update(token, s => s with { Detail = "代理可用；非全局模式，自动切换暂停" });
                 return;
             }
-            if (failures < 2) return;
+            if (failures < 2 && probe.Failure != ProxyProbeFailure.SlowTimeout) return;
             if (snapshot is null) { Phase(token, ProxyPhase.Unavailable, error ?? "等待 Clash 控制接口恢复"); return; }
             if (!snapshot.CanSelect) { Phase(token, ProxyPhase.Unavailable, "当前不是全局 GLOBAL 选择模式，暂停自动切换"); return; }
             await RecoverAsync(snapshot, token, ct);
@@ -192,11 +194,13 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             Update(token, s => s with { TestingRegionId = regionId, CandidateCount = candidates.Length, Completed = 0 });
             if (candidates.Length == 0) { Emit(token, $"{regionName} 暂无可选节点，本轮跳过"); continue; }
             List<NodeDelay> delays = [];
+            var remaining = candidates;
             for (var index = 0; index < ProxyPolicy.TestUrls.Length; index++)
             {
-                Update(token, s => s with { Completed = 0 });
+                if (remaining.Length == 0) break;
+                Update(token, s => s with { Completed = 0, CandidateCount = remaining.Length });
                 Phase(token, ProxyPhase.Testing, $"第 {round} 轮 · {regionName} · {(index == 0 ? "主地址" : "备用地址")}测速");
-                delays = await MeasureAsync(candidates, expected.Endpoint, ProxyPolicy.TestUrls[index], token, completedRegions, ct);
+                (delays, remaining) = await MeasureAsync(remaining, expected.Endpoint, ProxyPolicy.TestUrls[index], token, completedRegions, ct);
                 if (!Active(token)) return;
                 if (delays.Count > 0) break;
             }
@@ -252,7 +256,9 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
                     Apply(token, confirmed); Healthy(token, verification);
                     Emit(token, $"代理已恢复：{candidate.Name}；符合条件的 agent 将重新冷却 10 秒"); return;
                 }
-                Emit(token, $"{candidate.Name} 实际代理请求失败，尝试 {regionName} 下一可用节点");
+                Emit(token, verification.Failure == ProxyProbeFailure.SlowTimeout
+                    ? $"{candidate.Name} 连续两次延迟超过 {ProxyPolicy.MaximumLatencyMs} ms，视为节点超时，尝试 {regionName} 下一可用节点"
+                    : $"{candidate.Name} 实际代理请求失败，尝试 {regionName} 下一可用节点");
                 expected = confirmed;
             }
             Emit(token, $"{regionName} 实际连通性均未通过，按优先级尝试其他地区");
@@ -261,33 +267,36 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
         Phase(token, ProxyPhase.Retrying, "全部已选地区暂不可用；稍后开始新一轮检查和测速");
     }
 
-    private async Task<List<NodeDelay>> MeasureAsync(ClashNode[] nodes, LocalEndpoint endpoint, string url, int token,
+    private async Task<(List<NodeDelay> Delays, ClashNode[] RequestFailures)> MeasureAsync(ClashNode[] nodes, LocalEndpoint endpoint, string url, int token,
         IReadOnlyList<NodeDelay> previousRegions, CancellationToken ct)
     {
         List<NodeDelay> results = [];
-        foreach (var chunk in nodes.Chunk(4))
+        List<ClashNode> requestFailures = [];
+        var allowed = nodes.Select(n => n.Name).ToHashSet(StringComparer.Ordinal);
+        ct.ThrowIfCancellationRequested();
+        var tasks = nodes.Select(async node =>
         {
-            if (!Active(token)) break;
-            var tasks = chunk.Select(async node =>
+            var probe = await LatencyPolicy.CheckAsync(async cancellation => await service.DelayAsync(node.Name, endpoint, url, cancellation), ct);
+            return (Node: node, Probe: probe);
+        }).ToList();
+        var all = tasks.ToArray();
+        try
+        {
+            while (tasks.Count > 0)
             {
-                try { var delay = await service.DelayAsync(node.Name, endpoint, url, ct); return delay is > 0 and <= 5000 ? new NodeDelay(node.Name, delay, node.Region!.Id) : null; }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch { return null; }
-            }).ToList();
-            try
-            {
-                while (tasks.Count > 0)
-                {
-                    var completed = await Task.WhenAny(tasks); tasks.Remove(completed);
-                    var result = await completed;
-                    if (result is not null) results.Add(result);
-                    Update(token, s => s with { Completed = s.Completed + 1,
-                        Delays = previousRegions.Concat(ProxyPolicy.Ranked(results, nodes.Select(n => n.Name).ToHashSet(StringComparer.Ordinal))).ToArray() });
-                }
+                var completed = await Task.WhenAny(tasks); tasks.Remove(completed);
+                var (node, probe) = await completed;
+                ct.ThrowIfCancellationRequested();
+                if (probe.Healthy) results.Add(new(node.Name, probe.LatencyMs!.Value, node.Region!.Id));
+                else if (probe.Failure == ProxyProbeFailure.SlowTimeout)
+                    Emit(token, $"{node.Name} 连续两次延迟超过 {ProxyPolicy.MaximumLatencyMs} ms，视为节点超时，本轮排除");
+                else requestFailures.Add(node);
+                Update(token, s => s with { Completed = s.Completed + 1,
+                    Delays = previousRegions.Concat(ProxyPolicy.Ranked(results, allowed)).ToArray() });
             }
-            finally { try { await Task.WhenAll(tasks); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } }
         }
-        return results;
+        finally { try { await Task.WhenAll(all); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } }
+        return (results, requestFailures.ToArray());
     }
 
     private async Task<ClashSnapshot?> CheckedSnapshotAsync(ClashSnapshot expected, int token, CancellationToken ct)

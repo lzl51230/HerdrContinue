@@ -126,7 +126,7 @@ public sealed class MainWindow : Window
     {
         var window = new Window { Title = model.DelayTitle, Width = 530, Height = 330, MinWidth = 420, MinHeight = 240,
             Content = new StackPanel { Margin = new(20), Spacing = 12, Children = { Text(model.DelayTitle, 18, FontWeight.SemiBold),
-                new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("只比较本轮成功结果；超时节点不参与选择。", 12, color: Secondary) } } };
+                new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("同地区全部并行测速；连续两次超过 800 ms 视为超时。", 12, color: Secondary) } } };
         window.ShowDialog(this);
     }
     private static TextBlock Text(string value, double size, FontWeight? weight = null, IBrush? color = null) => new()

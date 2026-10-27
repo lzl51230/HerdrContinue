@@ -15,7 +15,7 @@ public sealed class ProxyPolicyTests
     }
     [Fact] public void RankingIgnoresOtherRegionsAndInvalidDelays()
     {
-        var ranked = ProxyPolicy.Ranked([new(OtherNode, 1), new(JapanSlow, 100), new(JapanFast, 20), new("JP zero", 0), new("JP timeout", 6000)], new HashSet<string> { JapanFast, JapanSlow, "JP zero", "JP timeout" });
+        var ranked = ProxyPolicy.Ranked([new(OtherNode, 1), new(JapanSlow, 100), new(JapanFast, 20), new("JP zero", 0), new("JP timeout", 6000), new("JP slow", 801)], new HashSet<string> { JapanFast, JapanSlow, "JP zero", "JP timeout", "JP slow" });
         Assert.Equal(new[] { JapanFast, JapanSlow }, ranked.Select(d => d.Name));
     }
     [Fact] public async Task ConsecutiveFailuresAndFreshHealth()
@@ -97,9 +97,18 @@ public sealed class ProxyMonitorTests
         await Eventually(() => Volatile.Read(ref service.ActiveTests) > 0); await proxy.StopAsync();
         Assert.Empty(service.Selected); Assert.Equal(0, service.ActiveTests); Assert.Equal(ProxyPhase.Stopped, proxy.Status.Phase);
     }
-    [Fact] public async Task AtMostFourConcurrentMeasurements()
+    [Fact] public async Task EveryNodeStartsBeforeAnyMeasurementCompletes()
     {
-        var service = new FakeClash { Healthy = false, State = Clash(names: Enumerable.Range(1, 11).Select(i => "JP-" + i).ToArray()), Delays = [] };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.InRange(service.MaximumConcurrent, 2, 4);
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new FakeClash { Healthy = false, State = Clash(names: Enumerable.Range(1, 11).Select(i => "JP-" + i).ToArray()),
+            HealthyNodes = ["JP-1"], Measure = (_, _, ct) => release.Task.WaitAsync(ct) };
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); var checking = proxy.CheckNowAsync();
+        try
+        {
+            await Eventually(() => Volatile.Read(ref service.ActiveTests) == 11);
+            Assert.Equal(11, service.MaximumConcurrent); Assert.Equal(0, proxy.Status.Completed);
+        }
+        finally { release.TrySetResult(50); await checking; }
+        Assert.Equal(new[] { "JP-1" }, service.Selected); Assert.Equal(11, proxy.Status.Completed);
     }
 }

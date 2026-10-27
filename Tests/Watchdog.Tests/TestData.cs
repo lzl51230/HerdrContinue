@@ -65,17 +65,29 @@ internal sealed class FakeClash : IClashService
     public Dictionary<string, int> Delays = new() { [TestData.JapanFast] = 50, [TestData.JapanSlow] = 120, [TestData.OtherNode] = 1 };
     public Dictionary<string, int>? Fallback;
     public ClashSnapshot? Mutation;
+    public ProxyProbeFailure ProbeFailure;
+    public Func<string, CancellationToken, Task<ProxyProbe>>? Probe;
+    public Func<string, string, CancellationToken, Task<int>>? Measure;
     public List<string> Selected = [], Tested = [], TestedUrls = [];
     public int ActiveTests, MaximumConcurrent;
     public Task<ClashSnapshot> SnapshotAsync(CancellationToken ct)
     { lock (sync) return FailSnapshot ? throw new HerdrException("mock offline") : Task.FromResult(State); }
     public Task<ProxyProbe> ProbeProxyAsync(CancellationToken ct)
-    { lock (sync) return Task.FromResult(new ProxyProbe(Healthy || HealthyNodes.Contains(State.Selected ?? ""), 100)); }
+    {
+        lock (sync)
+        {
+            var selected = State.Selected ?? "";
+            if (Probe is not null) return Probe(selected, ct);
+            var healthy = Healthy || HealthyNodes.Contains(selected);
+            return Task.FromResult(new ProxyProbe(healthy, healthy ? 100 : null, healthy ? ProxyProbeFailure.None : ProbeFailure));
+        }
+    }
     public async Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken ct)
     {
         lock (sync) { Tested.Add(node); TestedUrls.Add(url); ActiveTests++; MaximumConcurrent = Math.Max(MaximumConcurrent, ActiveTests); }
         try
         {
+            if (Measure is not null) return await Measure(node, url, ct);
             await Task.Delay(SlowTests ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(2), ct);
             lock (sync)
             {

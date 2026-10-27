@@ -49,6 +49,18 @@ public sealed class MonitorTests
         await monitor.Proxy.CheckNowAsync(); await monitor.ScanNowAsync(); time.Now = 10; await monitor.ScanNowAsync(); await service.RefreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         clash.Healthy = false; await monitor.Proxy.CheckNowAsync(); await monitor.StopAsync(); Assert.Equal(0, service.Sent); Assert.Null(monitor.Snapshot.Rows[0].Deadline);
     }
+    [Fact] public async Task ConfirmedSlowTimeoutPausesAgentAndRecoveryRestartsFullCooldown()
+    {
+        var service = new FakeHerdr(); var clash = new FakeClash { Delays = [] }; var time = new ManualTime();
+        await using var monitor = new MonitorEngine(service, clash, timeProvider: time); await monitor.StartAsync(false);
+        await monitor.Proxy.CheckNowAsync(); await monitor.ScanNowAsync(); Assert.Equal(10, monitor.Snapshot.Rows[0].Deadline);
+        time.Now = 5; clash.Healthy = false; clash.ProbeFailure = ProxyProbeFailure.SlowTimeout;
+        await monitor.Proxy.CheckNowAsync(); await monitor.ScanNowAsync();
+        Assert.Equal(1, monitor.Proxy.Status.Round); Assert.Null(monitor.Snapshot.Rows[0].Deadline); Assert.Equal(0, service.Sent);
+        time.Now = 100; clash.Healthy = true; await monitor.Proxy.CheckNowAsync(); await monitor.ScanNowAsync();
+        Assert.Equal(110, monitor.Snapshot.Rows[0].Deadline); time.Now = 109.99; await monitor.ScanNowAsync(); Assert.Equal(0, service.Sent);
+        time.Now = 110; await monitor.ScanNowAsync(); await Eventually(() => service.Sent == 1);
+    }
     [Fact] public async Task CloseWhileRevalidatingDrainsTasksAndCanRestart()
     {
         var service = new FakeHerdr { SlowRefresh = true }; var time = new ManualTime(); await using var monitor = new MonitorEngine(service, new FakeClash(), timeProvider: time);
