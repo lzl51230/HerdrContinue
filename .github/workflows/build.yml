@@ -1,0 +1,28 @@
+name: Cross-platform checks
+on: [push, pull_request]
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore HerdrContinue.slnx --locked-mode
+      - run: dotnet build HerdrContinue.slnx -c Release --no-restore
+      - run: dotnet test HerdrContinue.slnx -c Release --no-build --logger trx --results-directory TestResults
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - if: runner.os == 'macOS'
+        run: bash scripts/build-install.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: artifacts-${{ matrix.os }}
+          path: |
+            TestResults
+            dist/*.zip

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>codex</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/Watchdog.Infrastructure/Watchdog.Infrastructure.csproj" /></ItemGroup>
+</Project>

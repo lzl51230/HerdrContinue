@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="src/Watchdog.Core/Watchdog.Core.csproj" />
+  <Project Path="src/Watchdog.Infrastructure/Watchdog.Infrastructure.csproj" />
+  <Project Path="src/HerdrAutoContinue/HerdrAutoContinue.csproj" />
+  <Project Path="src/Watchdog.Probe/Watchdog.Probe.csproj" />
+  <Project Path="Tests/Watchdog.Tests/Watchdog.Tests.csproj" />
+  <Project Path="Tests/Watchdog.FakeAgent/Watchdog.FakeAgent.csproj" />
+</Solution>
