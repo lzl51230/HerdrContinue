@@ -42,7 +42,7 @@ public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartReg
             return Current = new(loaded.Settings with { AutoStartEnabled = loaded.Settings.AutoStartEnabled && entry.Enabled }, entry, warning) { RequestedSettings = loaded.Settings };
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false, State: AutoStartState.Unavailable), "无法读取系统自启动项，自动运行已暂停：" + e.Message) { RequestedSettings = loaded.Settings }; }
+        { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false, State: AutoStartState.Unavailable), "无法读取系统自启动项，登录自启动已暂停：" + e.Message) { RequestedSettings = loaded.Settings }; }
     }
     public Task<AppSettingsStatus> ApplyAsync(AppSettings settings, CancellationToken ct = default) =>
         ApplyChangeAsync(new(settings.Theme, settings.AutoStartEnabled), ct);

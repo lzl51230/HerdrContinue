@@ -12,10 +12,10 @@ namespace Watchdog.Tests;
 public sealed class AppStartupTests
 {
     [Theory] [InlineData(false, false)] [InlineData(false, true)] [InlineData(true, false)] [InlineData(true, true)]
-    public void EveryNewLaunchUsesThePreferenceAndOnlySystemLaunchIsHidden(bool enabled, bool background)
+    public void ManualLaunchAlwaysStartsServiceWhileHiddenLaunchRequiresLoginStartup(bool enabled, bool background)
     {
         var options = LaunchOptions.Parse(background ? ["--autostart"] : []);
-        Assert.Equal(background, options.StartHidden); Assert.Equal(enabled, options.ShouldStartService(new(enabled)));
+        Assert.Equal(background, options.StartHidden); Assert.Equal(!background || enabled, options.ShouldStartService(new(enabled)));
     }
     [Fact] public async Task GeneralSettingsDefaultOffAndDoNotOverwriteRegions()
     {
@@ -33,21 +33,25 @@ public sealed class AppStartupTests
         finally { Directory.Delete(root, true); }
     }
     [Theory] [InlineData("{")] [InlineData("{\"version\":2,\"autoStartEnabled\":true}")] [InlineData("{\"version\":1}")]
-    public async Task CorruptOrFutureSettingsSuspendAutomaticServiceWithoutOverwriting(string text)
+    public async Task CorruptOrFutureSettingsSuspendLoginStartupButAllowManualLaunchWithoutOverwriting(string text)
     {
         var root = TempDirectory(); var path = Path.Combine(root, "app-settings.json");
         try
         {
             await File.WriteAllTextAsync(path, text);
             var loaded = await new AppSettingsStore(path).LoadAsync(); Assert.False(loaded.Settings.AutoStartEnabled); Assert.NotNull(loaded.Warning);
+            Assert.True(LaunchOptions.Parse([]).ShouldStartService(loaded.Settings));
+            Assert.False(LaunchOptions.Parse(["--autostart"]).ShouldStartService(loaded.Settings));
             Assert.Equal(text, await File.ReadAllTextAsync(path));
         }
         finally { Directory.Delete(root, true); }
     }
-    [Fact] public async Task MissingRegistrationDoesNotRunAStaleEnabledPreference()
+    [Fact] public async Task MissingRegistrationSuspendsLoginStartupButAllowsManualLaunch()
     {
         var controller = new AppSettingsController(new MemorySettings { Value = new(true) }, new MemoryRegistration());
         Assert.False((await controller.InitializeAsync()).Settings.AutoStartEnabled); Assert.NotNull(controller.Current.Warning);
+        Assert.True(LaunchOptions.Parse([]).ShouldStartService(controller.Current.Settings));
+        Assert.False(LaunchOptions.Parse(["--autostart"]).ShouldStartService(controller.Current.Settings));
     }
     [Fact] public async Task SaveFailureRestoresTheOriginalStartupCommand()
     {

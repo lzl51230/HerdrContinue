@@ -75,6 +75,19 @@ try {
  if($result.desktopSessionId -eq 0){throw 'Run on the logged-in desktop'}
  if($FakeAgentPath) {
   if(Get-Process HerdrAutoContinue -ErrorAction SilentlyContinue|Where-Object {$_.Path -notmatch 'watchdog-qa-'}){throw 'An existing production monitor could interfere with the agent fixture'}
+ }
+ Run-Stage 'startup-off'
+ $settingsPath=Join-Path $state 'app-settings.json'
+ [IO.File]::WriteAllText($settingsPath,'{')
+ Run-Stage 'startup-corrupt'
+ if([IO.File]::ReadAllText($settingsPath) -ne '{'){throw 'Manual launch overwrote corrupt settings'}
+ [IO.File]::WriteAllText($settingsPath,'{"version":1,"autoStartEnabled":true}')
+ Run-Stage 'startup-missing-registration'
+ Remove-Item -LiteralPath $settingsPath
+ Run-Stage 'startup-enable'
+ Verify-Lists 'enabled'
+ # Create the failing agent only after preparation, so manual startup cannot resume it early.
+ if($FakeAgentPath) {
   foreach($variable in @('HERDR_SESSION','HERDR_SOCKET_PATH','HERDR_PANE_ID','HERDR_WORKSPACE_ID','HERDR_TAB_ID')){[Environment]::SetEnvironmentVariable($variable,$null,'Process')}
   $herdr=(Get-Command herdr.exe).Source
   $server=Start-Process $herdr -ArgumentList @('--session',$scope,'server') -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $state 'server.stdout') -RedirectStandardError (Join-Path $state 'server.stderr')
@@ -92,8 +105,6 @@ try {
   Wait-Condition { ((& $herdr --session $scope agent list|ConvertFrom-Json).result.agents|Where-Object {$_.agent -eq 'codex' -and $_.agent_status -eq 'idle'}) -ne $null }
   [IO.File]::WriteAllText((Join-Path $state 'expect-agent'),'')
  }
- Run-Stage 'startup-enable'
- Verify-Lists 'enabled'
  Run-Stage 'startup-system' $true $true
  if($FakeAgentPath){
   $receipt=@(Get-Content (Join-Path $state 'receipt.jsonl') -Encoding UTF8)

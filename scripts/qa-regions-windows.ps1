@@ -61,7 +61,12 @@ try{
     if($result.desktopSessionId -eq 0){throw 'QA must run on the interactive desktop'}
     $env:WATCHDOG_QA_SESSION='watchdog-qa-regions-'+[Guid]::NewGuid().ToString('N').Substring(0,8)
     $env:WATCHDOG_QA_SETTINGS_DIR=$OutputDirectory;$env:WATCHDOG_QA_REGIONS='recovery'
-    $app=Launch;$main=Get-Window $app;$dialog=Open-Settings $app
+    $app=Launch;$main=Get-Window $app
+    Wait-Until{(Find-Control $main 'service-toggle').Current.Name -match '停止服务' -and (Find-Control $main 'service-toggle').Current.IsEnabled}
+    $result.initialRunning=$true
+    Invoke-Control $main 'service-toggle'
+    Wait-Until{(Find-Control $main 'service-toggle').Current.Name -match '启动服务' -and (Find-Control $main 'service-toggle').Current.IsEnabled}
+    $dialog=Open-Settings $app
     Wait-Until{(Find-Control $dialog 'region-catalogue-summary').Current.Name -match '4 个地区'}
     $result.fourRegionsDiscovered=$true
     Set-Region $dialog 'HK' $true;Set-Region $dialog 'SG' $true;Invoke-Control $dialog 'region-up-HK'

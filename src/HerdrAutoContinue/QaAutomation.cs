@@ -28,7 +28,10 @@ internal static class QaAutomation
         try
         {
             await Task.Delay(500);
-            result["initialStopped"] = !model.QaSnapshot.Running;
+            await WaitAsync(() => model.QaSnapshot.Running);
+            result["initialRunning"] = true;
+            await model.StopAsync();
+            await model.RefreshRegionsAsync();
             if ((Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") ?? "").StartsWith("regions", StringComparison.Ordinal))
             {
                 await RunRegionsAsync(window, model, directory, result); await window.ExitAsync(); return;

@@ -29,7 +29,7 @@ internal static class StartupQaAutomation
         try
         {
             await Task.Delay(300);
-            var expected = scenario != "startup-enable" && !scenario.StartsWith("startup-off", StringComparison.Ordinal);
+            var expected = !options.StartHidden || !scenario.StartsWith("startup-off", StringComparison.Ordinal);
             await WaitAsync(() => model.QaSnapshot.Running == expected);
             result["initialRunning"] = model.QaSnapshot.Running;
             result["trayVisible"] = host.QaTrayVisible;
@@ -48,13 +48,18 @@ internal static class StartupQaAutomation
             }
             host.ShowMainWindow();
             var window = host.QaWindow!;
-            if (scenario.StartsWith("startup-off", StringComparison.Ordinal))
+            if (scenario.StartsWith("startup-off", StringComparison.Ordinal) || scenario is "startup-corrupt" or "startup-missing-registration")
             {
-                Require(!settings.Current.Settings.AutoStartEnabled && !model.QaSnapshot.Running, "Disabled startup ran the service");
-                result["disabledStartupRemainsStopped"] = true;
+                Require(!settings.Current.Settings.AutoStartEnabled && model.QaSnapshot.Running == !options.StartHidden, "Disabled login startup changed manual launch behavior");
+                Require(settings.Current.Registration.Value is null, "Manual launch registered login startup");
+                if (scenario is "startup-corrupt" or "startup-missing-registration")
+                    Require(settings.Current.Warning is not null, "Invalid login startup did not show a warning");
+                result["disabledLoginStartupRespected"] = true;
             }
             else if (scenario == "startup-enable")
             {
+                Require(settings.Current.Registration.Value is null, "First launch registered login startup");
+                await model.StopAsync();
                 Click(window, "app-settings"); await WaitAsync(() => host.QaSettingsWindow is not null);
                 var panel = host.QaSettingsWindow!;
                 Find<CheckBox>(panel, "startup-enabled").IsChecked = true;

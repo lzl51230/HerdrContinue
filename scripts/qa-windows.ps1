@@ -84,9 +84,8 @@ try {
     $env:WATCHDOG_QA_SESSION=$session
     $app=Launch $AppPath;$window=Get-Window $app
     Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
-    Wait-Until { (Find-Control $window 'service-toggle').Current.Name -match '启动服务' -and (Find-Control $window 'service-toggle').Current.IsEnabled }
-    $result.initialStopped=$true;Capture $window '01-stopped.png'
-    Invoke-Control $window 'service-toggle'
+    Wait-Until { (Find-Control $window 'service-toggle').Current.Name -match '停止服务' -and (Find-Control $window 'service-toggle').Current.IsEnabled }
+    $result.initialRunning=$true;Capture $window '01-running.png'
     Wait-Until { (Find-Control $window 'service-state').Current.Name -match '1 个冷却中' }
     $result.cooldownVisible=$true;Capture $window '02-cooldown.png'
     [QaNative]::MoveWindow([IntPtr]$window.Current.NativeWindowHandle,100,100,900,720,$true)|Out-Null
@@ -97,6 +96,9 @@ try {
     $result.exitCancelledPendingInput=$true
     $app=Launch $AppPath;$window=Get-Window $app
     Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
+    Wait-Until {(Find-Control $window 'service-toggle').Current.Name -match '停止服务'}
+    Invoke-Control $window 'service-toggle'
+    Wait-Until {(Find-Control $window 'service-toggle').Current.Name -match '启动服务'}
     [QaNative]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle)|Out-Null
     (Find-Control $window 'service-toggle').SetFocus()
     $watch=[Diagnostics.Stopwatch]::StartNew();[Windows.Forms.SendKeys]::SendWait('^{ENTER}')

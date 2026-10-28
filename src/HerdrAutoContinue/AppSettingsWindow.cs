@@ -44,7 +44,7 @@ public sealed class AppSettingsWindow : Window
         AutomationProperties.SetAutomationId(theme, "color-theme");
         theme.SelectionChanged += (_, _) => { if (theme.SelectedItem is ThemeChoice choice) themes.Preview(choice.Theme); };
         var previewHelp = new TextBlock { Text = "选择后立即预览；应用并保存后保留，取消则恢复原主题。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        var help = new TextBlock { Text = "系统登录后静默启动；开启后，手动启动新进程也会自动运行服务。\n关闭主窗口后继续在托盘／菜单栏运行，可从菜单停止服务或退出。\n请将应用保存在固定位置，移动后需重新开启自启动。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var help = new TextBlock { Text = "手动打开新进程始终运行服务；此开关仅控制系统登录后的静默启动。\n关闭主窗口后继续在托盘／菜单栏运行，可从菜单停止服务或退出。\n请将应用保存在固定位置，移动后需重新开启自启动。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         AppThemeManager.Bind(previewHelp, TextBlock.ForegroundProperty, "AppSecondary");
         AppThemeManager.Bind(help, TextBlock.ForegroundProperty, "AppSecondary");
         startupStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };

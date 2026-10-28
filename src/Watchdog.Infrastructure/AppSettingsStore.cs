@@ -29,7 +29,7 @@ public sealed class AppSettingsStore(string? path = null) : IAppSettingsStore
             return new(new(document.AutoStartEnabled.Value, theme), validTheme ? null : "颜色主题无法识别，已改为跟随系统。");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        { return new(new(), "通用设置读取失败，自动运行已暂停：" + e.Message); }
+        { return new(new(), "通用设置读取失败，登录自启动已暂停：" + e.Message); }
     }
     public async Task SaveAsync(AppSettings settings, CancellationToken ct = default)
     {

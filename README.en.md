@@ -28,7 +28,7 @@ The app's interface is currently in Chinese. The labels below include the text y
 1. Open Herdr and Clash Party, and check that your usual connection works.
 2. Open Herdr Auto Continue and click **Switch settings (切换设置)** on the proxy card.
 3. Under **Subscriptions (订阅源)**, check the subscriptions the app may use. Under **Regions & order (地区与排序)**, choose your regions and arrange them with ↑ / ↓. Click **Apply and save (应用并保存)**.
-4. Back in the main window, click **Start service (启动服务)**. The app watches all Herdr sessions on this computer and shows task status, countdowns, and continuation counts.
+4. The continuation service starts automatically when you open the app. The app watches all Herdr sessions on this computer and shows task status, countdowns, and continuation counts.
 
 On first use, only the **current subscription and Japan** are selected. Change these to suit your needs. Upgrading preserves your existing region choices and order; newly discovered subscriptions and regions need to be selected manually.
 
@@ -55,7 +55,7 @@ The app combines nodes from your selected subscriptions for use together while k
 | Run automatically when you log in | Open **Settings (设置)**, check **Launch at login and run the continuation service (登录后自动启动并运行续接服务)**, then save |
 | Change the colors | Open **Settings → Color theme (设置 → 颜色主题)**. Choose the system theme or one of six VS Code-inspired themes |
 
-With startup enabled, the app and continuation service start quietly in the background when you log in. Manually launching a new instance also starts the service. If the app is already running in the background, reopening it only shows the window; it won't restart a service you manually stopped.
+Manually launching a new process always starts the continuation service, even with launch at login disabled. Enabling launch at login also starts the app and service quietly in the background when you log in. If the app is already running in the background, reopening it only shows the window; it won't restart a service you manually stopped.
 
 Theme changes preview immediately. Click **Apply and save (应用并保存)** to keep them, or **Cancel (取消)** to restore the previous colors. You can also start or stop the service with **⌘Enter** on Mac or **Ctrl+Enter** on Windows.
 
@@ -63,7 +63,7 @@ Theme changes preview immediately. Click **Apply and save (应用并保存)** to
 
 **Why isn't it doing anything after I open it?**
 
-The service is stopped on first launch. Click **Start service (启动服务)**, or enable startup in Settings for future launches. If Herdr or Clash Party isn't open yet, the app waits and retries. The main window shows its current status.
+The service starts automatically when you manually launch a new process. If you stopped it in the current process, click **Start service (启动服务)**. Enable launch at login in Settings to also run it when you log in. If Herdr or Clash Party isn't open yet, the app waits and retries. The main window shows its current status.
 
 **Why didn't it continue after an error?**
 
