@@ -65,16 +65,21 @@ public interface IHerdrService
     Task ResumeAsync(Observation observation, CancellationToken cancellationToken);
 }
 
-public sealed record ClashNode(string Name, string Type = "Vless", string? Now = null, string[]? All = null)
+public sealed record ClashNode(string Name, string Type = "Vless", string? Now = null, string[]? All = null, string? SourceId = null, string? SourceName = null, string? OriginalName = null)
 {
     private static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { "direct", "reject", "rejectdrop", "pass", "compatible", "selector", "urltest", "fallback", "loadbalance", "relay" };
     [JsonIgnore] public bool IsProxyLeaf => All is null && !Excluded.Contains(Type);
-    [JsonIgnore] public ProxyRegion? Region => IsProxyLeaf ? RegionResolver.Resolve(Name) : null;
+    [JsonIgnore] public ProxyRegion? Region => IsProxyLeaf ? RegionResolver.Resolve(OriginalName ?? Name) : null;
 }
+
+public sealed record ProxySource(string Id, string Name, ClashNode[] Nodes, string? Error = null);
 
 public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int MixedPort, IReadOnlyDictionary<string, ClashNode> Nodes)
 {
+    public IReadOnlyList<ProxySource> Sources { get; init; } = [];
+    public string? CurrentSourceId { get; init; }
+    public string? ConfigurationRevision { get; init; }
     public string? Selected => Nodes.GetValueOrDefault("GLOBAL")?.Now;
     public bool CanSelect => Mode.Equals("global", StringComparison.OrdinalIgnoreCase) && MixedPort == 7890 &&
         Nodes.GetValueOrDefault("GLOBAL")?.Type.Equals("selector", StringComparison.OrdinalIgnoreCase) == true;
@@ -101,7 +106,7 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
             return [];
         }
     }
-    public bool HasSameConfiguration(ClashSnapshot other) => Endpoint == other.Endpoint && Mode == other.Mode &&
+    public bool HasSameConfiguration(ClashSnapshot other) => ConfigurationRevision == other.ConfigurationRevision && Endpoint == other.Endpoint && Mode == other.Mode &&
         MixedPort == other.MixedPort && Nodes.GetValueOrDefault("GLOBAL")?.Type == other.Nodes.GetValueOrDefault("GLOBAL")?.Type &&
         (Nodes.GetValueOrDefault("GLOBAL")?.All ?? []).SequenceEqual(other.Nodes.GetValueOrDefault("GLOBAL")?.All ?? []) &&
         Nodes.Count == other.Nodes.Count && Nodes.All(pair => other.Nodes.TryGetValue(pair.Key, out var node) && pair.Value.Name == node.Name &&
@@ -111,7 +116,7 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
 
 public enum ProxyProbeFailure { None, RequestFailed, SlowTimeout }
 public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null, ProxyProbeFailure Failure = ProxyProbeFailure.None);
-public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null);
+public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null, string? SourceName = null, string? OriginalName = null);
 public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, Retrying, Unavailable }
 public sealed record ProxyStatus
 {
@@ -130,6 +135,8 @@ public sealed record ProxyStatus
     public string? CurrentRegionId { get; init; }
     public string? TestingRegionId { get; init; }
     public int UnknownNodeCount { get; init; }
+    public IReadOnlyList<ProxySource> Sources { get; init; } = [];
+    public string? CurrentSourceId { get; init; }
     public bool CatalogueLoaded { get; init; }
     public string? CatalogueError { get; init; }
     public bool PermitsAgent(double now) => Phase == ProxyPhase.Healthy && HealthyAt is { } at && now >= at && now - at <= 20;
@@ -137,6 +144,8 @@ public sealed record ProxyStatus
 
 public interface IClashService
 {
+    Task PrepareSourcesAsync(ProxyRegionPreferences preferences, CancellationToken ct, Action? changing = null) => Task.CompletedTask;
+    Task RestoreSourcesAsync(CancellationToken ct) => Task.CompletedTask;
     Task<ClashSnapshot> SnapshotAsync(CancellationToken cancellationToken);
     Task<ProxyProbe> ProbeProxyAsync(CancellationToken cancellationToken);
     Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken cancellationToken);

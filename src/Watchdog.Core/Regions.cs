@@ -103,13 +103,16 @@ public sealed class ProxyRegionPreferences
 {
     public static ProxyRegionPreferences Default { get; } = new(["JP"]);
     public IReadOnlyList<string> PriorityRegionIds { get; }
-    public ProxyRegionPreferences(IEnumerable<string> ids)
+    public IReadOnlyList<string>? SelectedSourceIds { get; }
+    public bool Allows(ClashNode node, string? currentSourceId) => (node.SourceId is null ? SelectedSourceIds is null && !node.Name.StartsWith("HDAC-", StringComparison.Ordinal) : (SelectedSourceIds ?? (currentSourceId is null ? [] : new[] { currentSourceId })).Contains(node.SourceId));
+    public ProxyRegionPreferences(IEnumerable<string> ids, IEnumerable<string>? sourceIds = null)
     {
+        SelectedSourceIds = sourceIds is null ? null : Array.AsReadOnly(sourceIds.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
         PriorityRegionIds = Array.AsReadOnly(ids.Select(id => RegionResolver.ForId(id)?.Id ?? throw new ArgumentException("未知地区代码：" + id))
             .Distinct(StringComparer.Ordinal).ToArray());
     }
     public bool Contains(string? regionId) => regionId is not null && PriorityRegionIds.Contains(regionId);
-    public bool HasSameOrder(ProxyRegionPreferences other) => PriorityRegionIds.SequenceEqual(other.PriorityRegionIds);
+    public bool HasSameOrder(ProxyRegionPreferences other) => PriorityRegionIds.SequenceEqual(other.PriorityRegionIds) && (SelectedSourceIds is null ? other.SelectedSourceIds is null : other.SelectedSourceIds is not null && SelectedSourceIds.SequenceEqual(other.SelectedSourceIds));
     public IReadOnlyList<string> RecoveryOrder(string? currentRegionId) => Contains(currentRegionId)
         ? new[] { currentRegionId! }.Concat(PriorityRegionIds.Where(id => id != currentRegionId)).ToArray() : PriorityRegionIds;
 }

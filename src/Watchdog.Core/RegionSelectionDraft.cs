@@ -5,7 +5,8 @@ public sealed class RegionSelectionDraft(ProxyRegionPreferences preferences)
 {
     private readonly List<string> selected = preferences.PriorityRegionIds.ToList();
     public IReadOnlyList<string> Selected => selected.AsReadOnly();
-    public ProxyRegionPreferences ToPreferences() => new(selected);
+    public List<string>? Sources { get; set; } = preferences.SelectedSourceIds?.ToList();
+    public ProxyRegionPreferences ToPreferences() => new(selected, Sources);
     public void SetSelected(string id, bool enabled)
     {
         var canonical = RegionResolver.ForId(id)?.Id ?? throw new ArgumentException("未知地区代码");

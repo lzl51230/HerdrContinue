@@ -53,6 +53,7 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     public string RegionSummary => (RegionStatus.CatalogueLoaded
         ? $"发现 {RegionStatus.Regions.Count} 个地区 · {RegionStatus.Regions.Sum(r => r.NodeCount)} 个节点 · 未识别 {RegionStatus.UnknownNodeCount} 个"
         : "尚未读取地区列表") + (RegionStatus.CatalogueError is { } error ? " · 刷新失败：" + error : RegionStatus.CatalogueLoaded ? "" : " · 正在加载…");
+    public string SourceSummary => "已选 " + (RegionPreferences.SelectedSourceIds?.Count ?? (RegionStatus.CurrentSourceId is null ? 0 : 1)) + " 个订阅源";
     public string RegionOrder => RegionPreferences.PriorityRegionIds.Count == 0 ? "未选择恢复地区" :
         "恢复优先级：" + string.Join(" → ", RegionPreferences.PriorityRegionIds.Select(id => RegionResolver.ForId(id)!.Name));
     public string ToggleText => Running ? "■  停止服务" : "▶  启动服务";
@@ -69,11 +70,11 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
         ProxyPhase.Retrying => "等待重新测速", _ => "自动切换暂不可用"
     };
     public string ProxyDetail => snapshot.Proxy.Detail;
-    public string SelectedNode => "当前节点：" + (snapshot.Proxy.Selected ?? "等待读取") +
+    public string SelectedNode => "当前节点：" + (snapshot.Proxy.Sources.SelectMany(s=>s.Nodes).FirstOrDefault(n=>n.Name==snapshot.Proxy.Selected) is { } node ? node.SourceName + " · " + node.OriginalName : snapshot.Proxy.Selected ?? "等待读取") +
         (snapshot.Proxy.CurrentRegionId is { } id ? " · " + RegionResolver.ForId(id)!.Name : "");
     public string ProxyNumbers => snapshot.Proxy.Phase == ProxyPhase.Testing
         ? $"{RegionResolver.ForId(snapshot.Proxy.TestingRegionId ?? "")?.Name} · {snapshot.Proxy.Completed} / {snapshot.Proxy.CandidateCount}"
-        : $"已选 {RegionPreferences.PriorityRegionIds.Count} 个地区" + (snapshot.Proxy.LatencyMs is { } latency ? $"  ·  连通检查 {latency} ms" : "");
+        : $"{SourceSummary} · 已选 {RegionPreferences.PriorityRegionIds.Count} 个地区" + (snapshot.Proxy.LatencyMs is { } latency ? $"  ·  连通检查 {latency} ms" : "");
     public string ProxyCountdown => snapshot.Proxy.Phase is ProxyPhase.Retrying or ProxyPhase.Suspect or ProxyPhase.Unavailable && snapshot.Proxy.NextCheck is { } next
         ? $"{Math.Max(0, (int)Math.Ceiling(next - new MonotonicClock().Now))} 秒后重试" : "";
     public bool HasDelays => Delays.Count > 0;
@@ -113,6 +114,11 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
         uiError = null;
         Changed("");
     }
+    public async Task RestoreSourcesAsync(CancellationToken ct)
+    {
+        await regionSettings.RestoreAsync(ct);
+        uiError = null; Changed("");
+    }
     private void OnSnapshot(MonitorSnapshot value) => Dispatcher.UIThread.Post(() => Apply(value));
     private void Apply(MonitorSnapshot value)
     {
@@ -126,7 +132,7 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
             else { model.Update(row); var current = Rows.IndexOf(model); if (current != i) Rows.Move(current, i); }
         }
         Events.Clear(); foreach (var valueEvent in value.Events.Reverse()) Events.Add(valueEvent);
-        Delays.Clear(); foreach (var delay in value.Proxy.Delays) Delays.Add($"{RegionResolver.ForId(delay.RegionId ?? "")?.Name ?? "未知地区"} · {delay.Name}     {delay.Milliseconds} ms");
+        Delays.Clear(); foreach (var delay in value.Proxy.Delays) Delays.Add($"{RegionResolver.ForId(delay.RegionId ?? "")?.Name ?? "未知地区"} · {delay.SourceName} · {delay.OriginalName ?? delay.Name}     {delay.Milliseconds} ms");
         Changed("");
     }
     public async Task ToggleAsync()

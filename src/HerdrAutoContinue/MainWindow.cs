@@ -66,7 +66,7 @@ public sealed class MainWindow : Window
         var regionOrder = Bound(nameof(MainViewModel.RegionOrder), 12, Secondary);
         AutomationProperties.SetAutomationId(regionOrder, "region-order");
         regionOrder.Bind(ToolTip.TipProperty, new Binding(nameof(MainViewModel.RegionOrder))); Add(proxy, regionOrder, row: 3);
-        var regionSettings = new Button { Content = "地区设置", Padding = new(8, 3), FontSize = 12 };
+        var regionSettings = new Button { Content = "切换设置", Padding = new(8, 3), FontSize = 12 };
         regionSettings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(regionSettings, "region-settings");
         regionSettings.Click += async (_, _) => await new RegionSettingsWindow(model).ShowDialog(this); Add(proxy, regionSettings, row: 3, column: 1);

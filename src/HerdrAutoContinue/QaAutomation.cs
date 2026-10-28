@@ -33,6 +33,9 @@ internal static class QaAutomation
             {
                 await RunRegionsAsync(window, model, directory, result); await window.ExitAsync(); return;
             }
+            if(Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("sources",StringComparison.Ordinal)==true) {
+                await RunSourcesAsync(window,model,directory,result); await window.ExitAsync();return;
+            }
             Capture(window, Path.Combine(directory, "stopped.png"));
             await model.ToggleAsync();
             await WaitAsync(() => model.QaSnapshot.Rows.Any(r => r.Deadline is not null));
@@ -66,6 +69,32 @@ internal static class QaAutomation
         .Single(c => AutomationProperties.GetAutomationId(c) == id);
     private static void Click(Window window, string id) => Find<Button>(window, id).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     private static void Select(Window window, string id, bool value) => Find<CheckBox>(window, "region-check-" + id).IsChecked = value;
+    private static async Task RunSourcesAsync(MainWindow window,MainViewModel model,string directory,Dictionary<string,object?> result)
+    {
+        await model.RefreshRegionsAsync();
+        if(Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")=="sources-reload") {
+            if(model.RegionPreferences.SelectedSourceIds?.SequenceEqual(["A","B"])!=true) throw new InvalidOperationException("Restart lost source selection");
+            var reloaded=new RegionSettingsWindow(model);var shown=reloaded.ShowDialog(window);await Task.Delay(200);
+            if(Find<CheckBox>(reloaded,"source-check-B").IsChecked!=true) throw new InvalidOperationException("Source checkbox not restored");
+            Capture(reloaded,Path.Combine(directory,"sources-reloaded.png"));Click(reloaded,"region-cancel");await shown;
+            result["restartRestoredSources"]=true;result["success"]=true;return;
+        }
+        if(model.RegionPreferences.SelectedSourceIds?.SequenceEqual(["A"])!=true) throw new InvalidOperationException("Default sources must only contain current subscription");
+        var panel=new RegionSettingsWindow(model);var dialog=panel.ShowDialog(window);await Task.Delay(250);
+        Find<CheckBox>(panel,"source-check-B").IsChecked=true; await Task.Delay(100);
+        Capture(panel,Path.Combine(directory,"sources-selected.png"));Click(panel,"region-cancel");await dialog;
+        if(model.RegionPreferences.SelectedSourceIds?.Count!=1) throw new InvalidOperationException("Cancel changed sources");
+        panel=new RegionSettingsWindow(model);dialog=panel.ShowDialog(window);await Task.Delay(250);
+        Find<CheckBox>(panel,"source-check-B").IsChecked=true;
+        panel.GetVisualDescendants().OfType<TabControl>().Single().SelectedIndex=1;await Task.Delay(100);
+        Capture(panel,Path.Combine(directory,"sources-regions.png"));Click(panel,"region-apply");await dialog;
+        await model.ToggleAsync();await WaitAsync(()=>model.QaSnapshot.Proxy.Phase==ProxyPhase.Healthy,25);
+        if(model.QaSnapshot.Proxy.Selected!="验收源B日本01") throw new InvalidOperationException("Wrong cross-source selection");
+        await Task.Delay(300); // Let queued view-model notifications reach the rendered controls.
+        Capture(window,Path.Combine(directory,"sources-recovered.png"));
+        result["currentSourceDefault"]=true;result["cancelPreserved"]=true;result["crossSourceRecovered"]=true;result["uncheckedSourceExcluded"]=true;
+        result["success"]=true;
+    }
     private static async Task RunRegionsAsync(MainWindow window, MainViewModel model, string directory, Dictionary<string, object?> result)
     {
         await model.InitializeAsync();

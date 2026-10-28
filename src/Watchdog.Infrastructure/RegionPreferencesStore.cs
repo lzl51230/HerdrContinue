@@ -14,7 +14,7 @@ public sealed class RegionPreferencesStore(string? path = null) : IRegionPrefere
 {
     private readonly string path = path ?? AppPaths.SettingsPath;
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
-    private sealed record Settings(int Version, string[]? PriorityRegionIds);
+    private sealed record Settings(int Version, string[]? PriorityRegionIds, string[]? SelectedSourceIds = null);
     public async Task<RegionPreferencesLoad> LoadAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -22,8 +22,8 @@ public sealed class RegionPreferencesStore(string? path = null) : IRegionPrefere
             if (!File.Exists(path)) return new(ProxyRegionPreferences.Default);
             if (new FileInfo(path).Length > 65536) throw new JsonException("设置文件过大");
             var settings = JsonSerializer.Deserialize<Settings>(await File.ReadAllTextAsync(path, cancellationToken), Json);
-            if (settings is not { Version: 1, PriorityRegionIds: not null }) throw new JsonException("设置格式无法识别");
-            return new(new(settings.PriorityRegionIds));
+            if (settings is not { Version: 1 or 2, PriorityRegionIds: not null }) throw new JsonException("设置格式无法识别");
+            return new(new(settings.PriorityRegionIds, settings.SelectedSourceIds));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
         { return new(ProxyRegionPreferences.Default, "地区设置读取失败，暂用日本默认设置：" + e.Message); }
@@ -35,7 +35,7 @@ public sealed class RegionPreferencesStore(string? path = null) : IRegionPrefere
         var temporary = Path.Combine(directory, ".settings-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new Settings(1, preferences.PriorityRegionIds.ToArray()), Json), cancellationToken);
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new Settings(2, preferences.PriorityRegionIds.ToArray(), preferences.SelectedSourceIds?.ToArray()), Json), cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(temporary, full, true);
         }
