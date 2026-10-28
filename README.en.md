@@ -55,7 +55,7 @@ The app combines nodes from your selected subscriptions for use together while k
 | Run automatically when you log in | Open **Settings (设置)**, check **Launch at login and run the continuation service (登录后自动启动并运行续接服务)**, then save |
 | Change the colors | Open **Settings → Color theme (设置 → 颜色主题)**. Choose the system theme or one of six VS Code-inspired themes |
 
-Manually launching a new process always starts the continuation service, even with launch at login disabled. Enabling launch at login also starts the app and service quietly in the background when you log in. If the app is already running in the background, reopening it only shows the window; it won't restart a service you manually stopped.
+Manually launching a new process always starts the continuation service, even with launch at login disabled. Enabling launch at login also starts the app and service when you log in. Enable **Silent startup (静默启动)** in Settings to hide the main window on both manual and login launches. With this option off, both launches show the window. Silent startup defaults to off, including after upgrading older settings. If the app is already running in the background, reopening it only shows the window; it won't restart a service you manually stopped.
 
 Theme changes preview immediately. Click **Apply and save (应用并保存)** to keep them, or **Cancel (取消)** to restore the previous colors. You can also start or stop the service with **⌘Enter** on Mac or **Ctrl+Enter** on Windows.
 

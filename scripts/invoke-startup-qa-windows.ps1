@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][string]$AppPath,[Parameter(Mandatory=$true)][string]$OutputDirectory)
+﻿param([Parameter(Mandatory=$true)][string]$AppPath,[Parameter(Mandatory=$true)][string]$OutputDirectory,[switch]$SkipSystemLists)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if(Test-Path (Join-Path $OutputDirectory 'result.json')){throw 'Use a new output directory for each QA run'}
 New-Item -ItemType Directory -Force $OutputDirectory|Out-Null
@@ -8,7 +8,8 @@ $verifier='HerdrContinue-StartupListQA-'+$token
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 $mainPrincipal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $verifierPrincipal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
-$arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'qa-startup-windows.ps1')+'" -AppPath "'+$AppPath+'" -OutputDirectory "'+$OutputDirectory+'" -VerifySystemLists'
+$arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'qa-startup-windows.ps1')+'" -AppPath "'+$AppPath+'" -OutputDirectory "'+$OutputDirectory+'"'
+if(-not $SkipSystemLists){$arguments+=' -VerifySystemLists'}
 $action=New-ScheduledTaskAction -Execute powershell.exe -Argument $arguments
 try{
  Register-ScheduledTask -TaskName $main -Action $action -Principal $mainPrincipal|Out-Null

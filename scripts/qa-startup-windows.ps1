@@ -34,7 +34,7 @@ function Wait-Condition([scriptblock]$Condition){
  while($watch.Elapsed.TotalSeconds -lt 15){if(& $Condition){return};Start-Sleep -Milliseconds 100}
  throw 'Herdr fixture did not become ready'
 }
-function Run-Stage([string]$Scenario,[bool]$Hidden=$false,[bool]$Registered=$false) {
+function Run-Stage([string]$Scenario,[bool]$AutoStart=$false,[bool]$Registered=$false) {
  $folder=Join-Path $state $Scenario
  $env:WATCHDOG_QA_SESSION=$scope
  $env:WATCHDOG_QA_SETTINGS_DIR=$state
@@ -42,7 +42,10 @@ function Run-Stage([string]$Scenario,[bool]$Hidden=$false,[bool]$Registered=$fal
  $env:WATCHDOG_QA_AUTOMATION_DIR=$folder
  $info=[Diagnostics.ProcessStartInfo]::new($app)
  $info.UseShellExecute=$false;$info.CreateNoWindow=$true
- if($Hidden){$info.Arguments='--autostart'}
+ $Hidden=$false
+ $settingsFile=Join-Path $state 'app-settings.json'
+ if(Test-Path $settingsFile){try{$Hidden=(Get-Content $settingsFile -Raw|ConvertFrom-Json).silentStartEnabled -eq $true}catch{}}
+ if($AutoStart){$info.Arguments='--autostart'}
  if($Registered) {
   $line=Get-ItemPropertyValue -Path $key -Name $name
   $prefix='"'+$app+'"'
@@ -50,6 +53,7 @@ function Run-Stage([string]$Scenario,[bool]$Hidden=$false,[bool]$Registered=$fal
   if($line.Length -gt 260){throw 'Registered command exceeds Windows limit'}
   $info.Arguments=$line.Substring($prefix.Length).TrimStart()
   $folder=Join-Path $state 'system-login'
+  if(Test-Path $folder){Remove-Item $folder -Recurse -Force}
   $env:WATCHDOG_QA_SCENARIO=$null;$env:WATCHDOG_QA_AUTOMATION_DIR=$null
  }
  $p=[Diagnostics.Process]::Start($info);$processes.Add($p)
@@ -113,6 +117,11 @@ try {
   $result.singleAutomaticContinuation=$true;$result.actorElapsedSeconds=$record.elapsed
  }
  Run-Stage 'startup-manual'
+ Run-Stage 'startup-silent-enable'
+ Run-Stage 'startup-system-silent' $true $true
+ Run-Stage 'startup-manual-silent'
+ Run-Stage 'startup-silent-disable'
+ Run-Stage 'startup-manual-visible'
  Run-Stage 'startup-os-shutdown'
  Run-Stage 'startup-disable'
  if(Get-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue){throw 'Startup entry still exists after disabling'}

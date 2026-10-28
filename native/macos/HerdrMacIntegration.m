@@ -45,9 +45,9 @@ void hdac_login_prompt(void) { ShowApprovalPrompt(-1); }
 void hdac_login_qa_prompt(int settings) { ShowApprovalPrompt(settings); }
 #endif
 
-typedef void (*LaunchCallback)(int hidden);
+typedef void (*LaunchCallback)(int autoStart);
 static LaunchCallback launchCallback;
-static BOOL forcedHidden;
+static BOOL explicitAutoStart;
 static BOOL loginLaunch;
 static BOOL delivered;
 
@@ -63,7 +63,7 @@ static BOOL IsLoginEvent(void)
 static void CaptureLaunchReason(void) { if (IsLoginEvent()) loginLaunch = YES; }
 
 // Forward the framework's delegate contract, changing only initial presentation.
-// In particular, suppress its automatic activation for a login/background launch.
+// Defer activation until managed settings have determined initial presentation.
 @interface HDACLaunchDelegate : NSObject <NSApplicationDelegate>
 @property(strong) id original;
 @end
@@ -85,17 +85,16 @@ static void CaptureLaunchReason(void) { if (IsLoginEvent()) loginLaunch = YES; }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
     CaptureLaunchReason();
-    BOOL hidden = forcedHidden || loginLaunch;
-    [NSApp setActivationPolicy:hidden ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
-    if (!delivered) { delivered = YES; if (launchCallback) launchCallback(hidden ? 1 : 0); }
-    if (!hidden && [self.original respondsToSelector:_cmd]) [self.original applicationDidFinishLaunching:notification];
+    BOOL autoStart = explicitAutoStart || loginLaunch;
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    if (!delivered) { delivered = YES; if (launchCallback) launchCallback(autoStart ? 1 : 0); }
 }
 @end
 static HDACLaunchDelegate *launchDelegate;
 
-void hdac_launch_install(LaunchCallback callback, int hidden)
+void hdac_launch_install(LaunchCallback callback, int autoStart)
 {
-    launchCallback = callback; forcedHidden = hidden != 0;
+    launchCallback = callback; explicitAutoStart = autoStart != 0;
     launchDelegate = [HDACLaunchDelegate new];
     launchDelegate.original = NSApp.delegate;
     NSApp.delegate = launchDelegate;

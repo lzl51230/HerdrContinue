@@ -15,7 +15,7 @@ public sealed class AppStartupTests
     public void ManualLaunchAlwaysStartsServiceWhileHiddenLaunchRequiresLoginStartup(bool enabled, bool background)
     {
         var options = LaunchOptions.Parse(background ? ["--autostart"] : []);
-        Assert.Equal(background, options.StartHidden); Assert.Equal(!background || enabled, options.ShouldStartService(new(enabled)));
+        Assert.Equal(background, options.IsAutoStart); Assert.Equal(!background || enabled, options.ShouldStartService(new(enabled)));
     }
     [Fact] public async Task GeneralSettingsDefaultOffAndDoNotOverwriteRegions()
     {

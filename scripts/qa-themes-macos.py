@@ -24,6 +24,11 @@ for stage, scenario, hidden in (("themes", "themes", False), ("restart", "theme-
     folder = output / stage
     folder.mkdir(exist_ok=True)
     stage_env = env | {"WATCHDOG_QA_SCENARIO": scenario, "WATCHDOG_QA_AUTOMATION_DIR": str(folder)}
+    if hidden:
+        path = state / "app-settings.json"
+        saved = json.loads(path.read_text())
+        saved["silentStartEnabled"] = True
+        path.write_text(json.dumps(saved))
     with (folder / "process.log").open("wb") as log:
         process = subprocess.Popen([str(app), *(["--autostart"] if hidden else [])], env=stage_env, stdout=log, stderr=subprocess.STDOUT)
         try:

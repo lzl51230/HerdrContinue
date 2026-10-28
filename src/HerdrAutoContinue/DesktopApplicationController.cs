@@ -67,8 +67,8 @@ public sealed class DesktopApplicationController
         try
         {
             options = await MacLaunchContext.ResolveAsync(options, lifetime.Token);
-            showWhenReady |= !options.StartHidden;
             var loaded = await settings.InitializeAsync(lifetime.Token);
+            showWhenReady |= options.ShouldShowMainWindow(loaded.Settings);
             themes.Commit(loaded.Settings.Theme);
             themeReady = true;
             if (showWhenReady) ShowMainWindow();

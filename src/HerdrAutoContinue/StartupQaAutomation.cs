@@ -29,18 +29,19 @@ internal static class StartupQaAutomation
         try
         {
             await Task.Delay(300);
-            var expected = !options.StartHidden || !scenario.StartsWith("startup-off", StringComparison.Ordinal);
+            var expected = !options.IsAutoStart || settings.Current.Settings.AutoStartEnabled;
             await WaitAsync(() => model.QaSnapshot.Running == expected);
             result["initialRunning"] = model.QaSnapshot.Running;
             result["trayVisible"] = host.QaTrayVisible;
-            if (options.StartHidden)
+            if (settings.Current.Settings.SilentStartEnabled)
             {
                 Require(host.QaWindow is null, "Silent startup constructed a main window");
                 result["initialHidden"] = true;
                 Write(directory, "background-ready.json", result);
                 await Task.Delay(3000);
             }
-            else Require(host.QaWindow?.IsVisible == true, "Manual launch did not show its window");
+            else Require(host.QaWindow?.IsVisible == true, "Non-silent launch did not show its window");
+            Require(host.QaTrayVisible, "Tray icon is missing");
             if (scenario.Contains("agent", StringComparison.Ordinal))
             {
                 await WaitAsync(() => model.QaSnapshot.Events.Any(e => e.Message.Contains("Herdr 已确认提交")), 25);
@@ -50,7 +51,7 @@ internal static class StartupQaAutomation
             var window = host.QaWindow!;
             if (scenario.StartsWith("startup-off", StringComparison.Ordinal) || scenario is "startup-corrupt" or "startup-missing-registration")
             {
-                Require(!settings.Current.Settings.AutoStartEnabled && model.QaSnapshot.Running == !options.StartHidden, "Disabled login startup changed manual launch behavior");
+                Require(!settings.Current.Settings.AutoStartEnabled && model.QaSnapshot.Running == !options.IsAutoStart, "Disabled login startup changed manual launch behavior");
                 Require(settings.Current.Registration.Value is null, "Manual launch registered login startup");
                 if (scenario is "startup-corrupt" or "startup-missing-registration")
                     Require(settings.Current.Warning is not null, "Invalid login startup did not show a warning");
@@ -76,6 +77,43 @@ internal static class StartupQaAutomation
             }
             else
             {
+                if (scenario is "startup-silent-enable" or "startup-silent-disable")
+                {
+                    var target = scenario == "startup-silent-enable";
+                    var original = settings.Current.Settings;
+                    var entry = settings.Current.Registration;
+                    Click(window, "app-settings"); await WaitAsync(() => host.QaSettingsWindow is not null);
+                    var panel = host.QaSettingsWindow!;
+                    Find<CheckBox>(panel, "silent-start-enabled").IsChecked = target;
+                    Click(panel, "settings-cancel"); await WaitAsync(() => host.QaSettingsWindow is null);
+                    Require(settings.Current.Settings == original, "Cancel changed silent startup");
+                    Click(window, "app-settings"); await WaitAsync(() => host.QaSettingsWindow is not null);
+                    panel = host.QaSettingsWindow!;
+                    Find<CheckBox>(panel, "silent-start-enabled").IsChecked = target;
+                    panel.Close(); await WaitAsync(() => host.QaSettingsWindow is null);
+                    Require(settings.Current.Settings == original, "Closing settings changed silent startup");
+                    Click(window, "app-settings"); await WaitAsync(() => host.QaSettingsWindow is not null);
+                    panel = host.QaSettingsWindow!;
+                    Find<CheckBox>(panel, "silent-start-enabled").IsChecked = target;
+                    // Let the Activated status refresh finish before replacing the settings file.
+                    await Task.Delay(300);
+                    var path = Path.Combine(Path.GetDirectoryName(model.LogPath)!, "app-settings.json");
+                    File.Move(path, path + ".qa-backup"); Directory.CreateDirectory(path);
+                    try
+                    {
+                        Click(panel, "settings-apply");
+                        await WaitAsync(() => Find<TextBlock>(panel, "app-settings-message").Text?.StartsWith("保存失败") == true);
+                        Require(settings.Current.Settings.SilentStartEnabled == original.SilentStartEnabled, "Failed save changed silent startup");
+                        Capture(panel, Path.Combine(directory, "save-failed.png"));
+                    }
+                    finally { Directory.Delete(path); File.Move(path + ".qa-backup", path); }
+                    Find<CheckBox>(panel, "silent-start-enabled").IsChecked = target;
+                    Capture(panel, Path.Combine(directory, "silent-settings.png"));
+                    Click(panel, "settings-apply"); await WaitAsync(() => host.QaSettingsWindow is null);
+                    Require(settings.Current.Settings.SilentStartEnabled == target, "Silent startup did not persist");
+                    Require(settings.Current.Registration == entry && model.QaSnapshot.Running, "Silent setting changed registration or service");
+                    result["silentSettingCancelCloseFailureAndSave"] = true;
+                }
                 window.Close(); await Task.Delay(200);
                 Require(!window.IsVisible && model.QaSnapshot.Running, "Closing the window stopped monitoring");
                 result["closeHidesAndKeepsService"] = true;

@@ -26,7 +26,7 @@ internal static class Program
 #endif
             Options = LaunchOptions.Parse(args);
 #if DEBUG
-            if (args.Contains("--qa-login-test") && Options.StartHidden && Environment.GetEnvironmentVariable("WATCHDOG_QA_SETTINGS_DIR") is { } qaPath)
+            if (args.Contains("--qa-login-test") && Options.IsAutoStart && Environment.GetEnvironmentVariable("WATCHDOG_QA_SETTINGS_DIR") is { } qaPath)
             {
                 Environment.SetEnvironmentVariable("WATCHDOG_QA_SCENARIO", File.Exists(Path.Combine(qaPath, "expect-agent")) ? "startup-system-agent" : "startup-system");
                 Environment.SetEnvironmentVariable("WATCHDOG_QA_AUTOMATION_DIR", Path.Combine(qaPath, "system-login"));
@@ -43,7 +43,7 @@ internal static class Program
             using var instance = new AppInstance(scope);
             if (!instance.IsPrimary)
             {
-                instance.NotifyAsync(activateWindow: !Options.StartHidden).GetAwaiter().GetResult();
+                instance.NotifyAsync(activateWindow: !Options.IsAutoStart).GetAwaiter().GetResult();
                 return 0;
             }
             Instance = instance;

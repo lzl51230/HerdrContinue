@@ -18,7 +18,13 @@ foreach($stage in @('themes','restart','hidden')){
  $env:WATCHDOG_QA_AUTOMATION_DIR=$folder
  $info=[Diagnostics.ProcessStartInfo]::new($AppPath)
  $info.UseShellExecute=$false;$info.CreateNoWindow=$true
- if($stage -eq 'hidden'){$info.Arguments='--autostart'}
+ if($stage -eq 'hidden'){
+  $path=Join-Path $state 'app-settings.json'
+  $saved=Get-Content $path -Raw|ConvertFrom-Json
+  $saved|Add-Member -NotePropertyName silentStartEnabled -NotePropertyValue $true -Force
+  [IO.File]::WriteAllText($path,($saved|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+  $info.Arguments='--autostart'
+ }
  $process=[Diagnostics.Process]::Start($info)
  try{
   if(-not $process.WaitForExit(60000)){throw "Timed out: $stage"}

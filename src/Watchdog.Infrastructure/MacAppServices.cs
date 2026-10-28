@@ -23,8 +23,8 @@ public sealed class MacAppServices : IMacLoginItemService
 #if DEBUG
     [DllImport(Library, EntryPoint = "hdac_login_qa_prompt")] public static extern void QaPrompt(int settings);
 #endif
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void LaunchCallback(int hidden);
-    [DllImport(Library, EntryPoint = "hdac_launch_install")] public static extern void InstallLaunchHandler(LaunchCallback callback, int hidden);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void LaunchCallback(int autoStart);
+    [DllImport(Library, EntryPoint = "hdac_launch_install")] public static extern void InstallLaunchHandler(LaunchCallback callback, int autoStart);
     [DllImport(Library, EntryPoint = "hdac_launch_reveal")] public static extern void Reveal();
     [DllImport(Library, EntryPoint = "hdac_launch_restore")] public static extern void RestoreLaunchHandler();
     public AutoStartState Status => StatusNative() switch

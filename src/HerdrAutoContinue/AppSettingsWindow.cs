@@ -14,7 +14,7 @@ public sealed class AppSettingsWindow : Window
     private readonly AppThemeManager themes;
     private bool originalAutoStart;
     private readonly ComboBox theme;
-    private readonly CheckBox enabled;
+    private readonly CheckBox enabled, silent;
     private readonly TextBlock message;
     private readonly Button apply, cancel;
     private readonly TextBlock startupStatus;
@@ -31,6 +31,8 @@ public sealed class AppSettingsWindow : Window
         AutomationProperties.SetAutomationId(this, "app-settings-window");
         enabled = new CheckBox { Content = "登录后自动启动并运行续接服务", IsChecked = originalAutoStart };
         AutomationProperties.SetAutomationId(enabled, "startup-enabled");
+        silent = new CheckBox { Content = "静默启动", IsChecked = controller.Current.Settings.SilentStartEnabled };
+        AutomationProperties.SetAutomationId(silent, "silent-start-enabled");
         message = new TextBlock { Text = controller.Current.Warning ?? controller.AvailabilityError ?? "", TextWrapping = TextWrapping.Wrap };
         AppThemeManager.Bind(message, TextBlock.ForegroundProperty, "AppError");
         AutomationProperties.SetAutomationId(message, "app-settings-message");
@@ -44,7 +46,9 @@ public sealed class AppSettingsWindow : Window
         AutomationProperties.SetAutomationId(theme, "color-theme");
         theme.SelectionChanged += (_, _) => { if (theme.SelectedItem is ThemeChoice choice) themes.Preview(choice.Theme); };
         var previewHelp = new TextBlock { Text = "选择后立即预览；应用并保存后保留，取消则恢复原主题。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        var help = new TextBlock { Text = "手动打开新进程始终运行服务；此开关仅控制系统登录后的静默启动。\n关闭主窗口后继续在托盘／菜单栏运行，可从菜单停止服务或退出。\n请将应用保存在固定位置，移动后需重新开启自启动。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var silentHelp = new TextBlock { Text = "勾选后，手动或登录启动时不显示主界面；应用已在后台运行时再次打开可显示窗口。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        AppThemeManager.Bind(silentHelp, TextBlock.ForegroundProperty, "AppSecondary");
+        var help = new TextBlock { Text = "手动打开新进程始终运行服务；登录自启动控制登录后是否运行应用。\n关闭主窗口后继续在托盘／菜单栏运行，可从菜单停止服务或退出。\n请将应用保存在固定位置，移动后需重新开启自启动。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         AppThemeManager.Bind(previewHelp, TextBlock.ForegroundProperty, "AppSecondary");
         AppThemeManager.Bind(help, TextBlock.ForegroundProperty, "AppSecondary");
         startupStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
@@ -60,7 +64,7 @@ public sealed class AppSettingsWindow : Window
         UpdateStatus();
         var fields = new StackPanel { Spacing = 14, Children = {
             new TextBlock { Text = "颜色主题", FontWeight = FontWeight.SemiBold }, theme, previewHelp,
-            new Border { Height = 1, Margin = new(0, 4) }, enabled, help, startupStatus, systemSettings, message } };
+            new Border { Height = 1, Margin = new(0, 4) }, enabled, help, startupStatus, systemSettings, silent, silentHelp, message } };
         AppThemeManager.Bind((Border)fields.Children[3], Border.BackgroundProperty, "AppBorder");
         var scroll = new ScrollViewer { Content = fields, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
@@ -104,12 +108,12 @@ public sealed class AppSettingsWindow : Window
     private async Task SaveAsync()
     {
         var prompt = false;
-        saving = true; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = false;
+        saving = true; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = false;
         try
         {
             var selected = ((ThemeChoice)theme.SelectedItem!).Theme;
             var autoStart = enabled.IsChecked == true;
-            await controller.ApplyChangeAsync(new(selected, autoStart == originalAutoStart ? null : autoStart));
+            await controller.ApplyChangeAsync(new(selected, autoStart == originalAutoStart ? null : autoStart, silent.IsChecked == true));
             themes.Commit(controller.Current.Settings.Theme);
             prompt = autoStart && autoStart != originalAutoStart && controller.Current.Registration.Status == AutoStartState.RequiresApproval;
             originalAutoStart = DisplayedAutoStart();
@@ -121,9 +125,9 @@ public sealed class AppSettingsWindow : Window
             themes.CancelPreview();
             theme.SelectedItem = AppThemeManager.Choices.Single(c => c.Theme == themes.Saved);
             message.Text = "保存失败：" + e.Message; enabled.IsChecked = DisplayedAutoStart();
-            originalAutoStart = DisplayedAutoStart(); UpdateStatus();
+            originalAutoStart = DisplayedAutoStart(); silent.IsChecked = controller.Current.Settings.SilentStartEnabled; UpdateStatus();
         }
-        finally { saving = false; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = true; }
+        finally { saving = false; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = true; }
         if (prompt) controller.PromptForApproval();
     }
 }

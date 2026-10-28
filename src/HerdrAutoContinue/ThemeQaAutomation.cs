@@ -29,7 +29,7 @@ internal static class ThemeQaAutomation
             if (scenario == "theme-restart")
             {
                 Require(themes.Saved == AppTheme.DarkModern && themes.Effective == AppTheme.DarkModern, "Saved startup theme was not loaded");
-                if (options.StartHidden) Require(host.QaWindow is null, "Silent startup constructed a window");
+                if (settings.Current.Settings.SilentStartEnabled) Require(host.QaWindow is null, "Silent startup constructed a window");
                 host.ShowMainWindow();
                 await Task.Delay(200); CheckWindow(host.QaWindow!);
                 Capture(host.QaWindow!, Path.Combine(directory, "restored.png"));

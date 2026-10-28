@@ -2,8 +2,8 @@ namespace Watchdog.Core;
 
 public enum AppTheme { System, LightModern, DarkModern, LightPlus, DarkPlus, Monokai, SolarizedDark }
 
-public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System);
-public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null);
+public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System, bool SilentStartEnabled = false);
+public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null, bool? SilentStartEnabled = null);
 
 public static class AppThemes
 {
@@ -21,8 +21,9 @@ public static class AppThemes
     }
 }
 
-public sealed record LaunchOptions(bool StartHidden = false)
+public sealed record LaunchOptions(bool IsAutoStart = false)
 {
     public static LaunchOptions Parse(IEnumerable<string> arguments) => new(arguments.Contains("--autostart", StringComparer.Ordinal));
-    public bool ShouldStartService(AppSettings settings) => !StartHidden || settings.AutoStartEnabled;
+    public bool ShouldShowMainWindow(AppSettings settings) => !settings.SilentStartEnabled;
+    public bool ShouldStartService(AppSettings settings) => !IsAutoStart || settings.AutoStartEnabled;
 }

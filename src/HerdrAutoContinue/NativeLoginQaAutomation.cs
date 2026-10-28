@@ -16,7 +16,7 @@ internal static class NativeLoginQaAutomation
     public static async Task RunAsync(DesktopApplicationController host, MainViewModel model, AppSettingsController settings, string directory, LaunchOptions options)
     {
         Directory.CreateDirectory(directory);
-        var result = new Dictionary<string, object?> { ["pid"] = Environment.ProcessId, ["hidden"] = options.StartHidden };
+        var result = new Dictionary<string, object?> { ["pid"] = Environment.ProcessId, ["hidden"] = settings.Current.Settings.SilentStartEnabled };
         var scene = Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO");
         try
         {
@@ -29,6 +29,7 @@ internal static class NativeLoginQaAutomation
                 await Wait(() => host.QaSettingsWindow is not null);
                 var panel = host.QaSettingsWindow!;
                 Find<CheckBox>(panel, "startup-enabled").IsChecked = true;
+                Find<CheckBox>(panel, "silent-start-enabled").IsChecked = true;
                 Find<Button>(panel, "settings-apply").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await Wait(() => settings.Current.RequestedSettings.AutoStartEnabled);
                 Require(settings.Current.Registration.Status == AutoStartState.Enabled, "Native registration did not become enabled: " + settings.Current.Warning);
@@ -55,7 +56,7 @@ internal static class NativeLoginQaAutomation
             }
             else
             {
-                Require(options.StartHidden && host.QaWindow is null && model.QaSnapshot.Running, "Native login was not silent or did not start the service");
+                Require(options.IsAutoStart && host.QaWindow is null && model.QaSnapshot.Running, "Native login was not silent or did not start the service");
                 Write("background-ready.json"); await Task.Delay(3000);
                 host.ShowMainWindow();
                 Require(host.QaWindow?.IsVisible == true, "Manual reopen did not show the window");
