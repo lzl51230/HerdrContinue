@@ -5,12 +5,12 @@ namespace Watchdog.Infrastructure;
 public sealed class RegionSettingsController(IRegionPreferencesStore store, ProxyMonitor proxy)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
-    public async Task<string?> InitializeAsync(CancellationToken ct)
+    public async Task<string?> InitializeAsync(CancellationToken ct, bool refreshCatalogue = true)
     {
         await gate.WaitAsync(ct);
         try {
             var loaded = await store.LoadAsync(ct);
-            await proxy.RefreshCatalogueAsync(ct);
+            if (refreshCatalogue) await proxy.RefreshCatalogueAsync(ct);
             var preferences = loaded.Preferences;
             if (loaded.Warning is null && preferences.SelectedSourceIds is null && proxy.Status.CurrentSourceId is { } id)
             { preferences = new(preferences.PriorityRegionIds, [id]); await store.SaveAsync(preferences, ct); }

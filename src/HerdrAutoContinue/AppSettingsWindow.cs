@@ -15,8 +15,8 @@ public sealed class AppSettingsWindow : Window
     private bool originalAutoStart;
     private readonly ComboBox theme;
     private readonly NumericUpDown cooldown;
-    private readonly Action<AppSettings>? onSaved;
-    private readonly CheckBox enabled, silent;
+    private readonly Func<AppSettings, Task>? onSaved;
+    private readonly CheckBox enabled, silent, proxyRecovery, agentRecovery;
     private readonly TextBlock message;
     private readonly Button apply, cancel;
     private readonly TextBlock startupStatus;
@@ -24,7 +24,7 @@ public sealed class AppSettingsWindow : Window
     private bool refreshing;
     private bool saving;
     private Task pending = Task.CompletedTask;
-    public AppSettingsWindow(AppSettingsController controller, AppThemeManager themes, Action<AppSettings>? onSaved = null)
+    public AppSettingsWindow(AppSettingsController controller, AppThemeManager themes, Func<AppSettings, Task>? onSaved = null)
     {
         this.controller = controller; this.themes = themes; this.onSaved = onSaved;
         originalAutoStart = DisplayedAutoStart();
@@ -67,10 +67,16 @@ public sealed class AppSettingsWindow : Window
         AutomationProperties.SetAutomationId(cooldown, "cooldown-seconds");
         var cooldownHelp = new TextBlock { Text = "首次发现问题立即处理。后续按上次介入时间计算剩余冷却；网络节点切换与每个 agent 独立计时。范围 1～300 秒，保存后立即生效。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         AppThemeManager.Bind(cooldownHelp, TextBlock.ForegroundProperty, "AppSecondary");
+        proxyRecovery = new CheckBox { Content = "Clash 代理自动恢复", IsChecked = controller.Current.Settings.ProxyRecoveryEnabled };
+        agentRecovery = new CheckBox { Content = "Herdr agent 自动续接", IsChecked = controller.Current.Settings.AgentRecoveryEnabled };
+        AutomationProperties.SetAutomationId(proxyRecovery, "proxy-recovery-enabled");
+        AutomationProperties.SetAutomationId(agentRecovery, "agent-recovery-enabled");
+        var featureHelp = new TextBlock { Text = "关闭代理恢复后，不自动探测、测速或切换，agent 可独立续接。关闭 agent 续接后仍显示状态，但不发送“继续”。保存后立即生效。", TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        AppThemeManager.Bind(featureHelp, TextBlock.ForegroundProperty, "AppSecondary");
         UpdateStatus();
         var fields = new StackPanel { Spacing = 14, Children = {
             new TextBlock { Text = "颜色主题", FontWeight = FontWeight.SemiBold }, theme, previewHelp,
-            new Border { Height = 1, Margin = new(0, 4) }, new TextBlock { Text = "介入冷却时长（秒）", FontWeight = FontWeight.SemiBold }, cooldown, cooldownHelp, enabled, help, startupStatus, systemSettings, silent, silentHelp, message } };
+            new Border { Height = 1, Margin = new(0, 4) }, proxyRecovery, agentRecovery, featureHelp, new TextBlock { Text = "介入冷却时长（秒）", FontWeight = FontWeight.SemiBold }, cooldown, cooldownHelp, enabled, help, startupStatus, systemSettings, silent, silentHelp, message } };
         AppThemeManager.Bind((Border)fields.Children[3], Border.BackgroundProperty, "AppBorder");
         var scroll = new ScrollViewer { Content = fields, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
@@ -114,15 +120,15 @@ public sealed class AppSettingsWindow : Window
     private async Task SaveAsync()
     {
         var prompt = false;
-        saving = true; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = cooldown.IsEnabled = false;
+        saving = true; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = cooldown.IsEnabled = proxyRecovery.IsEnabled = agentRecovery.IsEnabled = false;
         try
         {
             if (cooldown.Value is not { } seconds || decimal.Truncate(seconds) != seconds || seconds is < 1 or > 300)
                 throw new ArgumentException("请输入 1～300 的整数秒数");
             var selected = ((ThemeChoice)theme.SelectedItem!).Theme;
             var autoStart = enabled.IsChecked == true;
-            await controller.ApplyChangeAsync(new(selected, autoStart == originalAutoStart ? null : autoStart, silent.IsChecked == true, (int)seconds));
-            onSaved?.Invoke(controller.Current.Settings);
+            await controller.ApplyChangeAsync(new(selected, autoStart == originalAutoStart ? null : autoStart, silent.IsChecked == true, (int)seconds, proxyRecovery.IsChecked == true, agentRecovery.IsChecked == true));
+            if (onSaved is not null) await onSaved(controller.Current.Settings);
             themes.Commit(controller.Current.Settings.Theme);
             prompt = autoStart && autoStart != originalAutoStart && controller.Current.Registration.Status == AutoStartState.RequiresApproval;
             originalAutoStart = DisplayedAutoStart();
@@ -136,7 +142,7 @@ public sealed class AppSettingsWindow : Window
             message.Text = "保存失败：" + e.Message; enabled.IsChecked = DisplayedAutoStart();
             originalAutoStart = DisplayedAutoStart(); silent.IsChecked = controller.Current.Settings.SilentStartEnabled; UpdateStatus();
         }
-        finally { saving = false; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = cooldown.IsEnabled = true; }
+        finally { saving = false; apply.IsEnabled = cancel.IsEnabled = enabled.IsEnabled = silent.IsEnabled = theme.IsEnabled = systemSettings.IsEnabled = cooldown.IsEnabled = proxyRecovery.IsEnabled = agentRecovery.IsEnabled = true; }
         if (prompt) controller.PromptForApproval();
     }
 }

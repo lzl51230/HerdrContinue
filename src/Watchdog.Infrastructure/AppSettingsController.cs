@@ -45,7 +45,7 @@ public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartReg
         { return Current = new(loaded.Settings with { AutoStartEnabled = false }, new(null, false, State: AutoStartState.Unavailable), "无法读取系统自启动项，登录自启动已暂停：" + e.Message) { RequestedSettings = loaded.Settings }; }
     }
     public Task<AppSettingsStatus> ApplyAsync(AppSettings settings, CancellationToken ct = default) =>
-        ApplyChangeAsync(new(settings.Theme, settings.AutoStartEnabled, settings.SilentStartEnabled, settings.CooldownSeconds), ct);
+        ApplyChangeAsync(new(settings.Theme, settings.AutoStartEnabled, settings.SilentStartEnabled, settings.CooldownSeconds, settings.ProxyRecoveryEnabled, settings.AgentRecoveryEnabled), ct);
     public async Task<AppSettingsStatus> ApplyChangeAsync(AppSettingsChange change, CancellationToken ct = default)
     {
         await gate.WaitAsync(ct);
@@ -53,7 +53,7 @@ public sealed class AppSettingsController(IAppSettingsStore store, IAutoStartReg
         {
             _ = AppThemes.Id(change.Theme);
             var loaded = await store.LoadAsync(ct);
-            var settings = loaded.Settings with { Theme = change.Theme, AutoStartEnabled = change.AutoStartEnabled ?? loaded.Settings.AutoStartEnabled, SilentStartEnabled = change.SilentStartEnabled ?? loaded.Settings.SilentStartEnabled, CooldownSeconds = change.CooldownSeconds ?? loaded.Settings.CooldownSeconds };
+            var settings = loaded.Settings with { Theme = change.Theme, AutoStartEnabled = change.AutoStartEnabled ?? loaded.Settings.AutoStartEnabled, SilentStartEnabled = change.SilentStartEnabled ?? loaded.Settings.SilentStartEnabled, CooldownSeconds = change.CooldownSeconds ?? loaded.Settings.CooldownSeconds, ProxyRecoveryEnabled = change.ProxyRecoveryEnabled ?? loaded.Settings.ProxyRecoveryEnabled, AgentRecoveryEnabled = change.AgentRecoveryEnabled ?? loaded.Settings.AgentRecoveryEnabled };
             InterventionCooldown.Validate(settings.CooldownSeconds);
             if (change.AutoStartEnabled is null)
             {

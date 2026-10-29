@@ -2,8 +2,8 @@ namespace Watchdog.Core;
 
 public enum AppTheme { System, LightModern, DarkModern, LightPlus, DarkPlus, Monokai, SolarizedDark }
 
-public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System, bool SilentStartEnabled = false, int CooldownSeconds = 5);
-public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null, bool? SilentStartEnabled = null, int? CooldownSeconds = null);
+public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System, bool SilentStartEnabled = false, int CooldownSeconds = 5, bool ProxyRecoveryEnabled = true, bool AgentRecoveryEnabled = true);
+public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null, bool? SilentStartEnabled = null, int? CooldownSeconds = null, bool? ProxyRecoveryEnabled = null, bool? AgentRecoveryEnabled = null);
 
 public static class InterventionCooldown
 {

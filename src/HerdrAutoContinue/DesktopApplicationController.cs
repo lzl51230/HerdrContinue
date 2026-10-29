@@ -68,7 +68,7 @@ public sealed class DesktopApplicationController
         {
             options = await MacLaunchContext.ResolveAsync(options, lifetime.Token);
             var loaded = await settings.InitializeAsync(lifetime.Token);
-            model.SetCooldownSeconds(loaded.Settings.CooldownSeconds);
+            await model.ApplyAppSettingsAsync(loaded.Settings);
             showWhenReady |= options.ShouldShowMainWindow(loaded.Settings);
             themes.Commit(loaded.Settings.Theme);
             themeReady = true;
@@ -77,7 +77,7 @@ public sealed class DesktopApplicationController
             if (loaded.Warning is { } warning) Report(warning);
             if (IsExiting) return;
             if (options.ShouldStartService(loaded.Settings)) await model.StartServiceAsync();
-            else await model.RefreshRegionsAsync(lifetime.Token);
+            else if (loaded.Settings.ProxyRecoveryEnabled) await model.RefreshRegionsAsync(lifetime.Token);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception e)
@@ -93,8 +93,8 @@ public sealed class DesktopApplicationController
     private void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         toggle.Header = model.Running ? "停止服务" : "启动服务"; toggle.IsEnabled = !IsExiting && model.CanToggle;
-        status.Header = model.Running ? "服务运行中 · " + model.ProxyTitle : "服务已停止";
-        tray.ToolTipText = "Herdr 自动续接 · " + (model.Running ? "运行中" : "已停止");
+        status.Header = model.Running ? model.FeatureSummary : "服务已停止";
+        tray.ToolTipText = "Herdr 自动续接 · " + (model.Running ? model.FeatureSummary : "已停止");
     }
     public void ShowMainWindow()
     {
@@ -123,7 +123,7 @@ public sealed class DesktopApplicationController
             await settings.InitializeAsync(lifetime.Token);
             if (IsExiting) return;
             themes.Commit(settings.Current.Settings.Theme);
-            settingsWindow = new(settings, themes, value => model.SetCooldownSeconds(value.CooldownSeconds));
+            settingsWindow = new(settings, themes, model.ApplyAppSettingsAsync);
             await settingsWindow.ShowDialog(window!);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -158,7 +158,9 @@ public sealed class DesktopApplicationController
     private async Task RunQaAsync(string directory)
     {
         await startup;
-        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("cooldown", StringComparison.Ordinal) == true)
+        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("features", StringComparison.Ordinal) == true)
+            await FeatureQaAutomation.RunAsync(this, model, settings, directory);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("cooldown", StringComparison.Ordinal) == true)
             await CooldownQaAutomation.RunAsync(this, model, settings, directory);
         else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } nativeScenario && nativeScenario.StartsWith("native-", StringComparison.Ordinal))
             await NativeLoginQaAutomation.RunAsync(this, model, settings, directory, options);

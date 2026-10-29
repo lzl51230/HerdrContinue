@@ -22,7 +22,9 @@ public sealed class MonitorEngine : IAsyncDisposable
     private readonly Dictionary<string, string> rowDetails = [];
     private readonly List<MonitorEvent> events = [];
     private AgentRow[] rows = [];
-    private bool running;
+    private bool running, automaticLoop = true;
+    private bool proxyRecoveryEnabled = true, agentRecoveryEnabled = true;
+    private bool CanResume => agentRecoveryEnabled && (!proxyRecoveryEnabled || Proxy.PermitsAgent);
     private int generation;
     private string connection = "服务已停止";
     private string? lastConnectionError;
@@ -43,6 +45,41 @@ public sealed class MonitorEngine : IAsyncDisposable
             Publish();
         }
     }
+    public async Task ApplyAppSettingsAsync(AppSettings settings, CancellationToken ct = default)
+    {
+        InterventionCooldown.Validate(settings.CooldownSeconds);
+        await lifecycle.WaitAsync(ct);
+        try
+        {
+            SetCooldownSeconds(settings.CooldownSeconds);
+            Attempt[] cancelled;
+            bool startProxy;
+            lock (sync)
+            {
+                var changed = proxyRecoveryEnabled != settings.ProxyRecoveryEnabled || agentRecoveryEnabled != settings.AgentRecoveryEnabled;
+                proxyRecoveryEnabled = settings.ProxyRecoveryEnabled; agentRecoveryEnabled = settings.AgentRecoveryEnabled;
+                cancelled = changed ? attempts.Values.Where(a => !a.Submitted).ToArray() : [];
+                if (changed)
+                {
+                    foreach (var attempt in cancelled) attempt.Cancel();
+                    machine.Stop();
+                    rows = rows.Select(r => r with { Deadline = null }).ToArray();
+                    Append("设置", $"Clash 自动恢复：{(proxyRecoveryEnabled ? "开启" : "关闭")}；agent 自动续接：{(agentRecoveryEnabled ? "开启" : "关闭")}");
+                }
+                rows = rows.Select(ApplyRowPolicy).ToArray();
+                startProxy = running && proxyRecoveryEnabled;
+                Publish();
+            }
+            await Proxy.SetRecoveryEnabledAsync(settings.ProxyRecoveryEnabled);
+            if (!startProxy) await Proxy.StopAsync();
+            else if (!Proxy.Running) Proxy.Start(automaticLoop);
+            await Task.WhenAll(cancelled.Select(a => a.Task));
+        }
+        finally { lifecycle.Release(); }
+    }
+    private AgentRow ApplyRowPolicy(AgentRow row) => !agentRecoveryEnabled
+        ? row with { Deadline = null, Detail = row.Detail.StartsWith("自动续接已关闭", StringComparison.Ordinal) ? row.Detail : "自动续接已关闭 · " + row.Detail }
+        : row with { Detail = row.Detail.StartsWith("自动续接已关闭 · ", StringComparison.Ordinal) ? row.Detail["自动续接已关闭 · ".Length..] : row.Detail };
     public event Action<MonitorSnapshot>? SnapshotChanged;
     public MonitorSnapshot Snapshot { get { lock (sync) return BuildSnapshot(); } }
 
@@ -55,7 +92,7 @@ public sealed class MonitorEngine : IAsyncDisposable
         {
             lock (sync)
             {
-                if (!status.PermitsAgent(clock.Now))
+                if (proxyRecoveryEnabled && !status.PermitsAgent(clock.Now))
                 {
                     machine.Stop();
                     foreach (var attempt in attempts.Values.Where(a => !a.Submitted)) attempt.Cancel();
@@ -75,10 +112,10 @@ public sealed class MonitorEngine : IAsyncDisposable
             lock (sync)
             {
                 if (running) return;
-                running = true; generation++; lifetime = new(); lastConnectionError = null;
+                running = true; automaticLoop = automatic; generation++; lifetime = new(); lastConnectionError = null;
                 connection = "正在连接 Herdr…"; Append("服务", $"开始监控；首次立即介入，后续独立冷却 {machine.CooldownSeconds} 秒"); Publish();
             }
-            Proxy.Start(automatic);
+            if (proxyRecoveryEnabled) Proxy.Start(automatic);
             if (automatic)
             {
                 var ct = lifetime.Token;
@@ -160,15 +197,16 @@ public sealed class MonitorEngine : IAsyncDisposable
                 lastScan = clock.Provider.GetUtcNow();
                 List<AgentRow> next = [];
                 List<ResumeIntent> intents = [];
-                if (!Proxy.PermitsAgent) machine.Stop();
+                if (!CanResume) machine.Stop();
                 foreach (var observation in observed)
                 {
                     var (row, intent) = machine.Evaluate(observation, clock.Now);
-                    if (!Proxy.PermitsAgent)
+                    if (!CanResume)
                     {
                         machine.Suspend([observation.Key]); intent = null;
-                        if (row.Deadline is not null) row = row with { Deadline = null, Detail = "等待代理恢复" };
+                        row = row with { Deadline = null, Detail = agentRecoveryEnabled ? "等待代理恢复" : row.Detail };
                     }
+                    row = ApplyRowPolicy(row);
                     next.Add(row);
                     if (rowDetails.GetValueOrDefault(row.Id) != row.Detail) { Append(row.Location, row.Detail); rowDetails[row.Id] = row.Detail; }
                     if (intent is not null) intents.Add(intent);
@@ -211,17 +249,19 @@ public sealed class MonitorEngine : IAsyncDisposable
         try
         {
             var fresh = await service.ObserveAsync(original.Agent, original.Session, true, ct);
+            Task submission;
             lock (sync)
             {
-                if (!Active(token) || ct.IsCancellationRequested || !Proxy.PermitsAgent || Proxy.HealthEpoch != proxyEpoch) return;
+                if (!Active(token) || ct.IsCancellationRequested || !CanResume || proxyRecoveryEnabled && Proxy.HealthEpoch != proxyEpoch) return;
                 if (!machine.Claim(intent, fresh, clock.Now)) { Append(target, "已取消本次发送：状态、输入或 agent 身份发生变化"); return; }
                 attempt.Submitted = true;
+                try { submission = service.ResumeAsync(fresh, ct); }
+                catch (Exception e) { submission = Task.FromException(e); }
                 Append(target, "发送「继续」并回车；依据：" + intent.Evidence.Message[..Math.Min(300, intent.Evidence.Message.Length)]);
             }
             try
             {
-                ct.ThrowIfCancellationRequested();
-                await service.ResumeAsync(fresh, ct);
+                await submission;
                 lock (sync) { if (!Active(token)) return; machine.SubmissionConfirmed(fresh.Key); Append(target, "Herdr 已确认提交并观察到 agent 开始运行"); }
             }
             catch (Exception e)
@@ -237,6 +277,8 @@ public sealed class MonitorEngine : IAsyncDisposable
             {
                 if (!Active(token)) return;
                 var row = machine.Evaluate(fresh, clock.Now).Row;
+                if (!CanResume) { machine.Suspend([fresh.Key]); row = row with { Deadline = null }; }
+                row = ApplyRowPolicy(row);
                 rows = rows.Select(r => r.Id == row.Id ? row : r).ToArray();
             }
         }
@@ -263,7 +305,7 @@ public sealed class MonitorEngine : IAsyncDisposable
         events.Add(value); if (events.Count > 500) events.RemoveRange(0, events.Count - 500);
         sink?.Append(value);
     }
-    private MonitorSnapshot BuildSnapshot() => new(running, connection, lastScan, rows.ToArray(), events.ToArray(), Proxy.Status);
+    private MonitorSnapshot BuildSnapshot() => new(running, connection, lastScan, rows.ToArray(), events.ToArray(), Proxy.Status, proxyRecoveryEnabled, agentRecoveryEnabled);
     private void Publish() => SnapshotChanged?.Invoke(BuildSnapshot());
     public async ValueTask DisposeAsync() { await StopAsync(); await Proxy.DisposeAsync(); lifecycle.Dispose(); scanGate.Dispose(); }
 }

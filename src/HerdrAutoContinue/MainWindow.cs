@@ -36,7 +36,7 @@ public sealed class MainWindow : Window
         var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,170,Auto") };
         var heading = new Grid { ColumnDefinitions = new("64,*,Auto"), Margin = new(24, 20) };
         heading.Children.Add(Text("↻", 47, color: Accent));
-        Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Text("按地区优先级恢复代理，连通后续接 agent", 13, color: Secondary) } }, column: 1);
+        Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Bound(nameof(MainViewModel.FeatureSummary), 13, Secondary) } }, column: 1);
         var toggle = new Button { Width = 132, Height = 42, Classes = { "accent" }, HorizontalContentAlignment = HorizontalAlignment.Center };
         toggle.Bind(ContentControl.ContentProperty, new Binding(nameof(MainViewModel.ToggleText)));
         toggle.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));

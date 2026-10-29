@@ -97,6 +97,18 @@ public sealed class ThemeSettingsTests
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.ApplyChangeAsync(new(AppTheme.System, CooldownSeconds: seconds)));
         Assert.Equal(10, store.Value.CooldownSeconds);
     }
+    [Fact] public async Task FeatureChangesPreserveOtherSettingsAndFailureLeavesFlagsUntouched()
+    {
+        var store = new MemoryStore { Value = new(true, AppTheme.Monokai, true, 10) };
+        var registration = new Registration { DenyRead = true };
+        var controller = new AppSettingsController(store, registration);
+        await controller.ApplyChangeAsync(new(AppTheme.Monokai, ProxyRecoveryEnabled: false));
+        await controller.ApplyChangeAsync(new(AppTheme.DarkPlus, AgentRecoveryEnabled: false));
+        Assert.Equal(new AppSettings(true,AppTheme.DarkPlus,true,10,false,false),store.Value);
+        Assert.Equal(0,registration.Writes);store.Fail=true;
+        await Assert.ThrowsAsync<IOException>(()=>controller.ApplyChangeAsync(new(AppTheme.DarkPlus,ProxyRecoveryEnabled:true)));
+        Assert.False(controller.Current.Settings.ProxyRecoveryEnabled);Assert.False(controller.Current.Settings.AgentRecoveryEnabled);
+    }
     private sealed class MemoryStore : IAppSettingsStore
     {
         public AppSettings Value = new(); public bool Fail;

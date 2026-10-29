@@ -86,3 +86,5 @@ The activity log at the bottom of the main window shows waiting periods, node ch
 For build instructions, troubleshooting, and detailed behavior, see the [development and verification guide](docs/development.md) (in Chinese).
 
 The intervention cooldown defaults to 5 seconds and can be changed to 1–300 seconds in Settings, taking effect when saved. The first intervention is immediate; later interventions wait only for the time remaining since the previous attempt. Each agent has an independent timer, separate from the timer between proxy node switches.
+
+Settings includes two independent switches, both enabled by default: **Clash proxy recovery** and **Herdr agent continuation**. Changes take effect when saved. Disabling proxy recovery stops automatic probes, measurements, and node switching; agents can continue without Clash. Disabling agent continuation keeps status monitoring but sends no continuation prompts. With both off, the service only monitors agents. Stopping the service stops all background monitoring.

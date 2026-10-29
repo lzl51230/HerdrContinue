@@ -12,6 +12,12 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
     private ProxyRegionPreferences preferences = preferences ?? ProxyRegionPreferences.Default;
     private ProxyStatus status = new() { RegionPriority = (preferences ?? ProxyRegionPreferences.Default).PriorityRegionIds };
     private volatile bool running;
+    private bool recoveryEnabled = true;
+    public async Task SetRecoveryEnabledAsync(bool enabled)
+    {
+        lock (sync) recoveryEnabled = enabled;
+        if (!enabled) await StopAsync();
+    }
     private bool disposed;
     private long epoch;
     private int generation, round;
@@ -45,7 +51,7 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
         lock (sync)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (running) return;
+            if (running || !recoveryEnabled) return;
             running = true; generation++; Interlocked.Increment(ref epoch); round = 0;
             while (wake.Wait(0)) { }
             lifetime = new();
@@ -184,7 +190,7 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
         int token; CancellationToken localToken, policyToken;
         lock (sync)
         {
-            if (!running || lifetime is null) return;
+            if (!running || !recoveryEnabled || lifetime is null) return;
             token = generation; localToken = lifetime.Token; policyToken = configuration.Token;
         }
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, localToken, policyToken);
@@ -294,7 +300,7 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
                         {
                             lock (sync)
                             {
-                                if (!running || generation != token || !preferences.Contains(regionId)) return;
+                                if (!running || !recoveryEnabled || generation != token || !preferences.Contains(regionId)) return;
                                 ct.ThrowIfCancellationRequested();
                                 if (clock.Now < lastSwitch + cooldownSeconds) continue;
                                 Phase(token, ProxyPhase.Switching, $"{regionName} · 验证 {Display(candidate)} · {candidate.Milliseconds} ms");

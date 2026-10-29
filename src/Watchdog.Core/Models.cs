@@ -171,4 +171,4 @@ public sealed class MonotonicClock(TimeProvider? timeProvider = null)
 
 public interface IEventSink { void Append(MonitorEvent value); }
 public sealed record MonitorSnapshot(bool Running, string Connection, DateTimeOffset? LastScan,
-    IReadOnlyList<AgentRow> Rows, IReadOnlyList<MonitorEvent> Events, ProxyStatus Proxy);
+    IReadOnlyList<AgentRow> Rows, IReadOnlyList<MonitorEvent> Events, ProxyStatus Proxy, bool ProxyRecoveryEnabled = true, bool AgentRecoveryEnabled = true);
