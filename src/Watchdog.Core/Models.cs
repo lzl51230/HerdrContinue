@@ -117,7 +117,7 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
 public enum ProxyProbeFailure { None, RequestFailed, SlowTimeout }
 public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null, ProxyProbeFailure Failure = ProxyProbeFailure.None);
 public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null, string? SourceName = null, string? OriginalName = null);
-public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, Retrying, Unavailable }
+public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, CoolingDown, Retrying, Unavailable }
 public sealed record ProxyStatus
 {
     public ProxyPhase Phase { get; init; } = ProxyPhase.Stopped;
@@ -129,6 +129,7 @@ public sealed record ProxyStatus
     public int Completed { get; init; }
     public int Round { get; init; }
     public double? NextCheck { get; init; }
+    public double? SwitchDeadline { get; init; }
     public IReadOnlyList<NodeDelay> Delays { get; init; } = [];
     public IReadOnlyList<RegionAvailability> Regions { get; init; } = [];
     public IReadOnlyList<string> RegionPriority { get; init; } = ["JP"];

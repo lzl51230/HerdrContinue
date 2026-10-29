@@ -38,6 +38,8 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private Task? initialization, disposal;
     private bool initialized;
+    public string CooldownDescription => $"独立冷却 {engine.CooldownSeconds} 秒 · 首次立即介入";
+    public void SetCooldownSeconds(int seconds) { engine.SetCooldownSeconds(seconds); Changed(nameof(CooldownDescription)); }
     public string LogPath { get; }
     public ICommand ToggleCommand { get; }
 #if DEBUG
@@ -67,7 +69,7 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     {
         ProxyPhase.Stopped => "代理监控已停止", ProxyPhase.Checking => "检查代理", ProxyPhase.Healthy => "代理正常",
         ProxyPhase.Suspect => "代理异常，等待复核", ProxyPhase.Testing => "地区节点测速中", ProxyPhase.Switching => "切换代理节点",
-        ProxyPhase.Retrying => "等待重新测速", _ => "自动切换暂不可用"
+        ProxyPhase.CoolingDown => "节点切换冷却中", ProxyPhase.Retrying => "等待重新测速", _ => "自动切换暂不可用"
     };
     public string ProxyDetail => snapshot.Proxy.Detail;
     public string SelectedNode => "当前节点：" + (snapshot.Proxy.Sources.SelectMany(s=>s.Nodes).FirstOrDefault(n=>n.Name==snapshot.Proxy.Selected) is { } node ? node.SourceName + " · " + node.OriginalName : snapshot.Proxy.Selected ?? "等待读取") +
@@ -75,7 +77,9 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     public string ProxyNumbers => snapshot.Proxy.Phase == ProxyPhase.Testing
         ? $"{RegionResolver.ForId(snapshot.Proxy.TestingRegionId ?? "")?.Name} · {snapshot.Proxy.Completed} / {snapshot.Proxy.CandidateCount}"
         : $"{SourceSummary} · 已选 {RegionPreferences.PriorityRegionIds.Count} 个地区" + (snapshot.Proxy.LatencyMs is { } latency ? $"  ·  连通检查 {latency} ms" : "");
-    public string ProxyCountdown => snapshot.Proxy.Phase is ProxyPhase.Retrying or ProxyPhase.Suspect or ProxyPhase.Unavailable && snapshot.Proxy.NextCheck is { } next
+    public string ProxyCountdown => snapshot.Proxy.Phase == ProxyPhase.CoolingDown && snapshot.Proxy.SwitchDeadline is { } deadline
+        ? $"{Math.Max(0, (int)Math.Ceiling(deadline - new MonotonicClock().Now))} 秒后复核切换"
+        : snapshot.Proxy.Phase is ProxyPhase.Retrying or ProxyPhase.Suspect or ProxyPhase.Unavailable && snapshot.Proxy.NextCheck is { } next
         ? $"{Math.Max(0, (int)Math.Ceiling(next - new MonotonicClock().Now))} 秒后重试" : "";
     public bool HasDelays => Delays.Count > 0;
     public string DelayTitle => $"第 {snapshot.Proxy.Round} 轮 · 地区测速结果";

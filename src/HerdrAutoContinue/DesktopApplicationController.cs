@@ -68,6 +68,7 @@ public sealed class DesktopApplicationController
         {
             options = await MacLaunchContext.ResolveAsync(options, lifetime.Token);
             var loaded = await settings.InitializeAsync(lifetime.Token);
+            model.SetCooldownSeconds(loaded.Settings.CooldownSeconds);
             showWhenReady |= options.ShouldShowMainWindow(loaded.Settings);
             themes.Commit(loaded.Settings.Theme);
             themeReady = true;
@@ -122,7 +123,7 @@ public sealed class DesktopApplicationController
             await settings.InitializeAsync(lifetime.Token);
             if (IsExiting) return;
             themes.Commit(settings.Current.Settings.Theme);
-            settingsWindow = new(settings, themes);
+            settingsWindow = new(settings, themes, value => model.SetCooldownSeconds(value.CooldownSeconds));
             await settingsWindow.ShowDialog(window!);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -157,7 +158,9 @@ public sealed class DesktopApplicationController
     private async Task RunQaAsync(string directory)
     {
         await startup;
-        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } nativeScenario && nativeScenario.StartsWith("native-", StringComparison.Ordinal))
+        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("cooldown", StringComparison.Ordinal) == true)
+            await CooldownQaAutomation.RunAsync(this, model, settings, directory);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } nativeScenario && nativeScenario.StartsWith("native-", StringComparison.Ordinal))
             await NativeLoginQaAutomation.RunAsync(this, model, settings, directory, options);
         else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") is { } scenario && scenario.StartsWith("theme", StringComparison.Ordinal))
             await ThemeQaAutomation.RunAsync(this, model, settings, themes, directory, options);

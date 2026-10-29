@@ -19,7 +19,13 @@ public sealed class RecoveryMachine
     }
     private readonly Dictionary<string, Record> records = [];
     private readonly FailureClassifier classifier = new();
-    public const double Cooldown = 10;
+    public int CooldownSeconds { get; private set; } = 5;
+    public void SetCooldownSeconds(int seconds)
+    {
+        InterventionCooldown.Validate(seconds); CooldownSeconds = seconds;
+        foreach (var record in records.Values)
+            if (record.Pending is not null) record.Deadline = record.LastAttempt + seconds;
+    }
 
     public (AgentRow Row, ResumeIntent? Intent) Evaluate(Observation observation, double now)
     {
@@ -45,7 +51,7 @@ public sealed class RecoveryMachine
             }
             else
             {
-                if (record.Pending != evidence) { record.Pending = evidence; record.Deadline = Math.Max(now + Cooldown, record.LastAttempt + Cooldown); }
+                record.Pending = evidence; record.Deadline = double.IsNegativeInfinity(record.LastAttempt) ? now : record.LastAttempt + CooldownSeconds;
                 if (now >= record.Deadline) { intent = new(observation, evidence); detail = "冷却结束，复核后发送"; }
             }
         }
@@ -60,7 +66,7 @@ public sealed class RecoveryMachine
     {
         if (fresh.Key != intent.Observation.Key || fresh.Occupant != intent.Observation.Occupant ||
             fresh.Agent.PaneId != intent.Observation.Agent.PaneId || classifier.Assess(fresh).Evidence != intent.Evidence ||
-            !records.TryGetValue(fresh.Key, out var record) || record.Pending != intent.Evidence || record.Deadline is not { } deadline || now < deadline)
+            !records.TryGetValue(fresh.Key, out var record) || record.Pending != intent.Evidence || record.Deadline is not { } deadline || now < deadline || now < record.LastAttempt + CooldownSeconds)
             return false;
         record.Pending = null; record.Deadline = null; record.Consumed = intent.Evidence.Fingerprint;
         record.ConsumedSequence = fresh.Agent.StateChangeSeq ?? 0; record.SawWorking = false;
@@ -72,12 +78,13 @@ public sealed class RecoveryMachine
     {
         if (!records.TryGetValue(key, out var record)) return;
         record.Outcome = definitelyNotSent ? "未发送，等待连接恢复" : "发送结果不明确，等待新证据以避免重复";
-        if (definitelyNotSent) { record.Consumed = null; record.Attempts = Math.Max(0, record.Attempts - 1); record.LastAttempt = now; }
+        if (definitelyNotSent) { record.Consumed = null; record.Attempts = Math.Max(0, record.Attempts - 1); }
     }
     public void SubmissionConfirmed(string key) { if (records.TryGetValue(key, out var r)) r.SawWorking = true; }
     public void Suspend(IEnumerable<string> keys)
     {
         foreach (var key in keys) if (records.TryGetValue(key, out var r)) { r.Pending = null; r.Deadline = null; }
     }
+    public double? Deadline(string key) => records.TryGetValue(key, out var r) ? r.Deadline : null;
     public void Stop() => Suspend(records.Keys);
 }

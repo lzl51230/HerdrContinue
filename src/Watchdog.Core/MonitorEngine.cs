@@ -30,6 +30,19 @@ public sealed class MonitorEngine : IAsyncDisposable
     private CancellationTokenSource? lifetime;
     private Task? loop;
     public ProxyMonitor Proxy { get; }
+    public int CooldownSeconds { get { lock (sync) return machine.CooldownSeconds; } }
+    public void SetCooldownSeconds(int seconds)
+    {
+        InterventionCooldown.Validate(seconds);
+        // Proxy notifications acquire sync; do not hold the engine lock across this call.
+        Proxy.SetCooldownSeconds(seconds);
+        lock (sync)
+        {
+            machine.SetCooldownSeconds(seconds);
+            rows = rows.Select(r => r.Deadline is null ? r : r with { Deadline = machine.Deadline(r.Id) is { } deadline ? Math.Max(clock.Now, deadline) : null }).ToArray();
+            Publish();
+        }
+    }
     public event Action<MonitorSnapshot>? SnapshotChanged;
     public MonitorSnapshot Snapshot { get { lock (sync) return BuildSnapshot(); } }
 
@@ -63,7 +76,7 @@ public sealed class MonitorEngine : IAsyncDisposable
             {
                 if (running) return;
                 running = true; generation++; lifetime = new(); lastConnectionError = null;
-                connection = "正在连接 Herdr…"; Append("服务", "开始监控；每个 agent 独立冷却 10 秒"); Publish();
+                connection = "正在连接 Herdr…"; Append("服务", $"开始监控；首次立即介入，后续独立冷却 {machine.CooldownSeconds} 秒"); Publish();
             }
             Proxy.Start(automatic);
             if (automatic)

@@ -2,8 +2,16 @@ namespace Watchdog.Core;
 
 public enum AppTheme { System, LightModern, DarkModern, LightPlus, DarkPlus, Monokai, SolarizedDark }
 
-public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System, bool SilentStartEnabled = false);
-public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null, bool? SilentStartEnabled = null);
+public sealed record AppSettings(bool AutoStartEnabled = false, AppTheme Theme = AppTheme.System, bool SilentStartEnabled = false, int CooldownSeconds = 5);
+public sealed record AppSettingsChange(AppTheme Theme, bool? AutoStartEnabled = null, bool? SilentStartEnabled = null, int? CooldownSeconds = null);
+
+public static class InterventionCooldown
+{
+    public static void Validate(int seconds)
+    {
+        if (seconds is < 1 or > 300) throw new ArgumentOutOfRangeException(nameof(seconds), "冷却时长应为 1～300 秒整数");
+    }
+}
 
 public static class AppThemes
 {

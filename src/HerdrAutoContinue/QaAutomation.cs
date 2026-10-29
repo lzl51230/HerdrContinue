@@ -41,9 +41,9 @@ internal static class QaAutomation
             }
             Capture(window, Path.Combine(directory, "stopped.png"));
             await model.ToggleAsync();
-            await WaitAsync(() => model.QaSnapshot.Rows.Any(r => r.Deadline is not null));
-            result["cooldownVisible"] = model.QaSnapshot.Rows.Any(r => r.Deadline is not null);
-            Capture(window, Path.Combine(directory, "cooldown.png"));
+            await WaitAsync(() => model.QaSnapshot.Events.Any(e => e.Message.Contains("Herdr 已确认提交")), 20);
+            result["firstFailureResumedImmediately"] = true;
+            Capture(window, Path.Combine(directory, "first-resume.png"));
             if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") != "cancel")
             {
                 await WaitAsync(() => model.QaSnapshot.Events.Any(e => e.Message.Contains("Herdr 已确认提交")), 20);

@@ -50,7 +50,7 @@ public sealed class MainWindow : Window
 
         var summary = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
         var summaryText = Bound(nameof(MainViewModel.Summary), 13, Accent); AutomationProperties.SetAutomationId(summaryText, "service-state");
-        summary.Children.Add(summaryText); Add(summary, Text("独立冷却 10 秒", 13, color: Secondary), column: 1);
+        summary.Children.Add(summaryText); Add(summary, Bound(nameof(MainViewModel.CooldownDescription), 13, Secondary), column: 1);
         Add(root, ThemedBorder(new Border { Child = summary }, "AppSummary"), row: 1);
 
         var proxy = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto"), ColumnDefinitions = new("*,Auto"), RowSpacing = 7 };

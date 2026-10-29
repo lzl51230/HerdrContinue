@@ -13,7 +13,7 @@ public sealed class ProxyLatencyTests
             Delays = new() { [JapanFast] = 900 }, Fallback = new() { [JapanFast] = 1, [JapanSlow] = 60 } };
         var events = new List<string>();
         await using var proxy = new ProxyMonitor(service); proxy.Event += events.Add;
-        proxy.Start(false); await proxy.CheckNowAsync(); await proxy.CheckNowAsync();
+        proxy.Start(false); await proxy.CheckNowAsync();
         Assert.True(proxy.PermitsAgent); Assert.Equal(new[] { JapanSlow }, service.Selected);
         Assert.Equal(2, service.Tested.Count(n => n == JapanFast));
         var backup = service.Tested.Zip(service.TestedUrls).Where(p => p.Second == ProxyPolicy.TestUrls[1]);
@@ -34,7 +34,7 @@ public sealed class ProxyLatencyTests
         var progress = new List<int>();
         await using var proxy = new ProxyMonitor(service);
         proxy.StatusChanged += s => { if (s.Phase == ProxyPhase.Testing) progress.Add(s.Completed); };
-        proxy.Start(false); await proxy.CheckNowAsync(); await proxy.CheckNowAsync();
+        proxy.Start(false); await proxy.CheckNowAsync();
         Assert.Equal(2, calls[JapanFast]); Assert.Equal(1, calls[JapanSlow]);
         Assert.Equal(new[] { JapanFast }, service.Selected); Assert.Equal(30, proxy.Status.Delays[0].Milliseconds);
         Assert.Equal(2, proxy.Status.Completed); Assert.All(progress, n => Assert.InRange(n, 0, 2));
@@ -45,7 +45,7 @@ public sealed class ProxyLatencyTests
     {
         var service = new FakeClash { Healthy = false, Delays = new() { [JapanFast] = 801, [JapanSlow] = 950 } };
         await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-        await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.Equal(4, service.Tested.Count);
+        await proxy.CheckNowAsync(); Assert.Equal(4, service.Tested.Count);
         Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase); Assert.Empty(proxy.Status.Delays);
         await proxy.CheckNowAsync(); Assert.Equal(8, service.Tested.Count); Assert.Equal(2, proxy.Status.Round);
         Assert.All(service.TestedUrls, url => Assert.Equal(ProxyPolicy.TestUrls[0], url)); Assert.Empty(service.Selected);
@@ -61,7 +61,7 @@ public sealed class ProxyLatencyTests
             if (url == ProxyPolicy.TestUrls[1]) return Task.FromResult(40);
             return count == 1 ? Task.FromResult(900) : throw new HerdrException("deadline");
         } };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); await proxy.CheckNowAsync();
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync();
         Assert.True(proxy.PermitsAgent); Assert.Equal(new[] { JapanFast }, service.Selected);
         Assert.Equal(2, calls[(JapanFast, ProxyPolicy.TestUrls[0])]); Assert.Equal(1, calls[(JapanFast, ProxyPolicy.TestUrls[1])]);
     }
@@ -96,7 +96,7 @@ public sealed class ProxyLatencyTests
             if (calls.AddOrUpdate(node, 1, (_, previous) => previous + 1) == 1) return 900;
             await Task.Delay(Timeout.InfiniteTimeSpan, ct); return 50;
         } };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); var checking = proxy.CheckNowAsync();
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); var checking = proxy.CheckNowAsync();
         try
         {
             await Eventually(() => calls.Values.Count(n => n == 2) == 2);

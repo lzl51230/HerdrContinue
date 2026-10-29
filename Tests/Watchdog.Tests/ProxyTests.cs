@@ -18,12 +18,8 @@ public sealed class ProxyPolicyTests
         var ranked = ProxyPolicy.Ranked([new(OtherNode, 1), new(JapanSlow, 100), new(JapanFast, 20), new("JP zero", 0), new("JP timeout", 6000), new("JP slow", 801)], new HashSet<string> { JapanFast, JapanSlow, "JP zero", "JP timeout", "JP slow" });
         Assert.Equal(new[] { JapanFast, JapanSlow }, ranked.Select(d => d.Name));
     }
-    [Fact] public async Task ConsecutiveFailuresAndFreshHealth()
+    [Fact] public void FreshHealthExpires()
     {
-        var service = new FakeClash { Healthy = false };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); Assert.Equal(ProxyPhase.Suspect, proxy.Status.Phase);
-        service.Healthy = true; await proxy.CheckNowAsync(); service.Healthy = false; await proxy.CheckNowAsync(); Assert.Equal(ProxyPhase.Suspect, proxy.Status.Phase);
-        await proxy.CheckNowAsync(); Assert.Equal(1, proxy.Status.Round);
         var status = new ProxyStatus { Phase = ProxyPhase.Healthy, HealthyAt = 100 };
         Assert.True(status.PermitsAgent(120)); Assert.False(status.PermitsAgent(120.1)); Assert.False(status.PermitsAgent(99));
     }
@@ -38,16 +34,15 @@ public sealed class ProxyMonitorTests
         var service = new FakeClash(); await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync();
         Assert.True(proxy.PermitsAgent); Assert.Equal(OtherNode, proxy.Status.Selected); Assert.Empty(service.Selected); Assert.Empty(service.Tested);
     }
-    [Fact] public async Task TwoFailedRoundsSelectFastestJapaneseNode()
+    [Fact] public async Task FirstFailedCheckSelectsFastestJapaneseNode()
     {
         var service = new FakeClash { Healthy = false, HealthyNodes = [JapanFast] }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-        await proxy.CheckNowAsync(); Assert.False(proxy.PermitsAgent); Assert.Equal(ProxyPhase.Suspect, proxy.Status.Phase); Assert.Empty(service.Selected);
         await proxy.CheckNowAsync(); Assert.Equal(new[] { JapanFast }, service.Selected); Assert.All(service.Tested, n => Assert.Contains(n, new[] { JapanFast, JapanSlow })); Assert.True(proxy.PermitsAgent);
     }
     [Fact] public async Task VerificationFailureTriesNextJapaneseNode()
     {
         var service = new FakeClash { Healthy = false, HealthyNodes = [JapanSlow] }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-        await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.Equal(new[] { JapanFast, JapanSlow }, service.Selected); Assert.True(proxy.PermitsAgent);
+        await proxy.CheckNowAsync(); Assert.Equal(new[] { JapanFast, JapanSlow }, service.Selected); Assert.True(proxy.PermitsAgent);
     }
     [Fact] public async Task AllTimeoutsRetryWithoutLimitAndWithoutFallbackCountry()
     {
@@ -55,12 +50,12 @@ public sealed class ProxyMonitorTests
         await using var proxy = new ProxyMonitor(service, new(time)); proxy.Start(false); await proxy.CheckNowAsync(); time.Now = 10; await proxy.CheckNowAsync();
         Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase); Assert.Equal(20, proxy.Status.NextCheck);
         for (var i = 0; i < 6; i++) { time.Now = 20 + i * 10; await proxy.CheckNowAsync(); }
-        Assert.Empty(service.Selected); Assert.Equal(7, proxy.Status.Round); Assert.Equal(7 * 2 * 2, service.Tested.Count); Assert.False(proxy.PermitsAgent);
+        Assert.Empty(service.Selected); Assert.Equal(8, proxy.Status.Round); Assert.Equal(8 * 2 * 2, service.Tested.Count); Assert.False(proxy.PermitsAgent);
     }
     [Fact] public async Task BackupUrlIsUsedWhenPrimaryAllFail()
     {
         var service = new FakeClash { Healthy = false, HealthyNodes = [JapanFast], Delays = [], Fallback = new() { [JapanFast] = 50, [JapanSlow] = 100 } };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); await proxy.CheckNowAsync();
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync();
         Assert.True(proxy.PermitsAgent); Assert.Equal(ProxyPolicy.TestUrls.Order(), service.TestedUrls.Distinct().Order());
     }
     [Fact] public async Task NoJapaneseNodesAndRuleModeNeverSelect()
@@ -68,7 +63,7 @@ public sealed class ProxyMonitorTests
         foreach (var state in new[] { Clash(names: [OtherNode]), Clash(mode: "rule") })
         {
             var service = new FakeClash { Healthy = false, State = state }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-            await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.Empty(service.Selected); Assert.False(proxy.PermitsAgent);
+            await proxy.CheckNowAsync(); Assert.Empty(service.Selected); Assert.False(proxy.PermitsAgent);
         }
     }
     [Fact] public async Task ManualSelectionOrReloadInvalidatesMeasurements()
@@ -76,18 +71,18 @@ public sealed class ProxyMonitorTests
         foreach (var state in new[] { Clash(JapanSlow), Clash(endpoint: "/tmp/restarted.sock"), Clash(names: [JapanSlow, OtherNode]) })
         {
             var service = new FakeClash { Healthy = false, Mutation = state }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-            await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.Empty(service.Selected); Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase);
+            await proxy.CheckNowAsync(); Assert.Empty(service.Selected); Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase);
         }
     }
     [Fact] public async Task AmbiguousWriteUsesReadbackInsteadOfRepeating()
     {
         var service = new FakeClash { Healthy = false, HealthyNodes = [JapanFast], SelectionError = true }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-        await proxy.CheckNowAsync(); await proxy.CheckNowAsync(); Assert.Equal(new[] { JapanFast }, service.Selected); Assert.True(proxy.PermitsAgent);
+        await proxy.CheckNowAsync(); Assert.Equal(new[] { JapanFast }, service.Selected); Assert.True(proxy.PermitsAgent);
     }
     [Fact] public async Task ControllerUnavailableDoesNotPreventHealthyProxyUse()
     {
         var service = new FakeClash { FailSnapshot = true }; await using var proxy = new ProxyMonitor(service); proxy.Start(false);
-        await proxy.CheckNowAsync(); Assert.True(proxy.PermitsAgent); service.Healthy = false; await proxy.CheckNowAsync(); await proxy.CheckNowAsync();
+        await proxy.CheckNowAsync(); Assert.True(proxy.PermitsAgent); service.Healthy = false; await proxy.CheckNowAsync();
         Assert.Equal(ProxyPhase.Unavailable, proxy.Status.Phase); Assert.False(proxy.PermitsAgent);
         service.FailSnapshot = false; service.Healthy = true; await proxy.CheckNowAsync(); Assert.True(proxy.PermitsAgent);
     }
@@ -102,7 +97,7 @@ public sealed class ProxyMonitorTests
         var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var service = new FakeClash { Healthy = false, State = Clash(names: Enumerable.Range(1, 11).Select(i => "JP-" + i).ToArray()),
             HealthyNodes = ["JP-1"], Measure = (_, _, ct) => release.Task.WaitAsync(ct) };
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync(); var checking = proxy.CheckNowAsync();
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); var checking = proxy.CheckNowAsync();
         try
         {
             await Eventually(() => Volatile.Read(ref service.ActiveTests) == 11);

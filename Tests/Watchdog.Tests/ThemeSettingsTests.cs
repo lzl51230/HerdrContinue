@@ -76,6 +76,27 @@ public sealed class ThemeSettingsTests
         Assert.Equal(new AppSettings(true, AppTheme.SolarizedDark), store.Value);
         Assert.True(controller.Current.Settings.AutoStartEnabled); Assert.Equal(1, registration.Writes);
     }
+    [Fact] public async Task CooldownPartialChangePreservesStartupAndOtherPreferences()
+    {
+        var store = new MemoryStore { Value = new(true, AppTheme.Monokai, true, 10) };
+        var registration = new Registration { DenyRead = true };
+        var controller = new AppSettingsController(store, registration);
+        await controller.ApplyChangeAsync(new(AppTheme.Monokai, CooldownSeconds: 1));
+        await controller.ApplyChangeAsync(new(AppTheme.DarkPlus));
+        Assert.Equal(new AppSettings(true, AppTheme.DarkPlus, true, 1), store.Value);
+        Assert.Equal(0, registration.Writes);
+    }
+    [Fact] public async Task CooldownSaveFailureAndInvalidRangePreserveSavedValue()
+    {
+        var store = new MemoryStore { Value = new(CooldownSeconds: 10), Fail = true };
+        var controller = new AppSettingsController(store, new Registration());
+        await controller.InitializeAsync();
+        await Assert.ThrowsAsync<IOException>(() => controller.ApplyChangeAsync(new(AppTheme.System, CooldownSeconds: 5)));
+        Assert.Equal(10, controller.Current.Settings.CooldownSeconds);
+        foreach (var seconds in new[] { 0, 301 })
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.ApplyChangeAsync(new(AppTheme.System, CooldownSeconds: seconds)));
+        Assert.Equal(10, store.Value.CooldownSeconds);
+    }
     private sealed class MemoryStore : IAppSettingsStore
     {
         public AppSettings Value = new(); public bool Fail;

@@ -4,7 +4,7 @@
 
 When you're drafting a plan, working through requirements, or leaving an AI assistant on a long task, a temporary “service busy” or network error can bring everything to a halt. You have to come back and tell it to continue.
 
-Herdr Auto Continue takes care of that follow-up. It watches tasks in Herdr on your computer. When it recognizes a retryable error, it waits at least 10 seconds, checks that the task is still stuck on the same error, and sends “继续” (“continue”). If the proxy connection fails, it can also look for a working node among your chosen subscriptions and regions, then resume eligible tasks once the connection recovers.
+Herdr Auto Continue takes care of that follow-up. It watches tasks in Herdr on your computer. When it recognizes a retryable error, it immediately checks that the task is still stuck on the same error, and sends “继续” (“continue”). If the proxy connection fails, it can also look for a working node among your chosen subscriptions and regions, then resume eligible tasks once the connection recovers.
 
 Automatic continuation currently supports **Codex and OMP**. Completed tasks, tasks you stopped yourself, confirmation prompts, and login, quota, or rate-limit issues are left for you to handle.
 
@@ -84,3 +84,5 @@ The activity log at the bottom of the main window shows waiting periods, node ch
 ## More details
 
 For build instructions, troubleshooting, and detailed behavior, see the [development and verification guide](docs/development.md) (in Chinese).
+
+The intervention cooldown defaults to 5 seconds and can be changed to 1–300 seconds in Settings, taking effect when saved. The first intervention is immediate; later interventions wait only for the time remaining since the previous attempt. Each agent has an independent timer, separate from the timer between proxy node switches.

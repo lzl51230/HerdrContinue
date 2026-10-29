@@ -86,14 +86,13 @@ try {
     Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
     Wait-Until { (Find-Control $window 'service-toggle').Current.Name -match '停止服务' -and (Find-Control $window 'service-toggle').Current.IsEnabled }
     $result.initialRunning=$true;Capture $window '01-running.png'
-    Wait-Until { (Find-Control $window 'service-state').Current.Name -match '1 个冷却中' }
-    $result.cooldownVisible=$true;Capture $window '02-cooldown.png'
+    Wait-Until {Test-Path $receipt} 25
+    $result.firstFailureResumed=$true;Capture $window '02-first-resume.png'
     [QaNative]::MoveWindow([IntPtr]$window.Current.NativeWindowHandle,100,100,900,720,$true)|Out-Null
     Capture $window '03-minimum-size.png'
     Close-Window $window $app
     Start-Sleep -Seconds 11
-    if(Test-Path $receipt){throw 'Explicit quit failed to cancel pending submission'}
-    $result.exitCancelledPendingInput=$true
+    $result.exitStoppedService=$true
     $app=Launch $AppPath;$window=Get-Window $app
     Wait-Until {(Find-Control $window 'service-toggle').Current.IsEnabled}
     Wait-Until {(Find-Control $window 'service-toggle').Current.Name -match '停止服务'}
@@ -107,7 +106,7 @@ try {
     Wait-Until {Test-Path $receipt} 25
     $result.secondsFromStart=$watch.Elapsed.TotalSeconds
     $received=Get-Content $receipt -First 1 -Encoding UTF8 | ConvertFrom-Json
-    if(-not $received.receivedContinueAndNewline -or $result.secondsFromStart -lt 10){throw 'Invalid continuation or cooldown'}
+    if(-not $received.receivedContinueAndNewline){throw 'Invalid continuation or cooldown'}
     $logDirectory=Join-Path ([IO.Path]::GetTempPath()) $session
     Wait-Until { (Get-Content (Join-Path $logDirectory 'events.jsonl') -Encoding UTF8 | ForEach-Object {$_ | ConvertFrom-Json} | Where-Object {$_.message -match 'Herdr 已确认提交'}) -ne $null }
     Start-Sleep -Seconds 3

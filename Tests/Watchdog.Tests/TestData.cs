@@ -37,14 +37,49 @@ internal sealed class ManualTime : TimeProvider
     public override long TimestampFrequency => 1000;
     public override long GetTimestamp() => Interlocked.Read(ref ticks);
     public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch.AddMilliseconds(GetTimestamp());
-    public double Now { set => Interlocked.Exchange(ref ticks, (long)(value * 1000)); }
+    private readonly List<ManualTimer> timers = [];
+    public double Now
+    {
+        set
+        {
+            Interlocked.Exchange(ref ticks, (long)(value * 1000));
+            ManualTimer[] ready;
+            lock (timers) ready = timers.Where(t => t.Due <= GetTimestamp()).ToArray();
+            foreach (var timer in ready) timer.Fire();
+        }
+    }
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new ManualTimer(this, callback, state); timer.Change(dueTime, period); return timer;
+    }
+    private sealed class ManualTimer(ManualTime owner, TimerCallback callback, object? state) : ITimer
+    {
+        public long Due = long.MaxValue; private long repeat; private bool disposed;
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            lock (owner.timers)
+            {
+                if (disposed) return false;
+                Due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : owner.GetTimestamp() + (long)dueTime.TotalMilliseconds;
+                repeat = period == Timeout.InfiniteTimeSpan ? 0 : (long)period.TotalMilliseconds;
+                if (!owner.timers.Contains(this)) owner.timers.Add(this); return true;
+            }
+        }
+        public void Fire()
+        {
+            lock (owner.timers) { if (disposed || Due > owner.GetTimestamp()) return; Due = repeat > 0 ? owner.GetTimestamp() + repeat : long.MaxValue; }
+            callback(state);
+        }
+        public void Dispose() { lock (owner.timers) { disposed = true; owner.timers.Remove(this); } }
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+    }
 }
 
 internal sealed class FakeHerdr : IHerdrService
 {
     public Observation Value = TestData.Observe();
     public int Sent;
-    public bool Offline, Replacement, SlowRefresh;
+    public bool Offline = false, Replacement, SlowRefresh;
     public TaskCompletionSource RefreshStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken ct) => Offline ? throw new HerdrException("offline") : Task.FromResult<IReadOnlyList<Session>>([TestData.Session]);
     public Task<IReadOnlyList<Agent>> AgentsAsync(Session s, CancellationToken ct) => Task.FromResult<IReadOnlyList<Agent>>([Value.Agent]);

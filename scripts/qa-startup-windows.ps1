@@ -113,7 +113,7 @@ try {
  if($FakeAgentPath){
   $receipt=@(Get-Content (Join-Path $state 'receipt.jsonl') -Encoding UTF8)
   $record=$receipt[0]|ConvertFrom-Json
-  if($receipt.Count -ne 1 -or -not $record.receivedContinueAndNewline -or $record.elapsed -lt 10){throw 'Invalid automatic continuation/cooldown'}
+  if($receipt.Count -ne 1 -or -not $record.receivedContinueAndNewline){throw 'Invalid automatic continuation/cooldown'}
   $result.singleAutomaticContinuation=$true;$result.actorElapsedSeconds=$record.elapsed
  }
  Run-Stage 'startup-manual'
