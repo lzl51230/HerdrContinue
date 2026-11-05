@@ -17,6 +17,7 @@ internal static class Program
         try
         {
 #if DEBUG
+            if (args.Contains("--qa-memory")) return MemoryQaApplication.Run(args);
             LoadQaBundleSettings();
             for (var i = 0; i + 1 < args.Length; i++)
             {

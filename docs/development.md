@@ -159,6 +159,22 @@ Windows GUI 验收由 `scripts/qa-windows.ps1` 驱动真实 UI Automation；通�
 
 脚本保存截图和 JSON 结果，清理自己创建的 Herdr 会话及计划任务。实际 Herdr 会话和 Clash 节点只做读取。macOS Debug 窗口可通过 `WATCHDOG_QA_AUTOMATION_DIR` 和 `WATCHDOG_QA_SCENARIO=cancel|resume` 执行相同生命周期检查。
 
+## 长期运行内存回归
+
+macOS 构建会自动重建带无障碍引用生命周期补丁的 Avalonia.Native；托管依赖仍为 12.1.4。首次构建需要 Python 3.12+、Xcode Command Line Tools 和网络，后续使用 `.tools/` 缓存。补丁、固定源码版本、许可证和构建方式见 [原生库说明](../native/avalonia/README.md)。Windows 使用官方原生库。
+
+```sh
+# 隔离回归：官方库应失败，修复库应通过。
+python3 scripts/qa-memory-macos.py --output-directory dist/memory-stock --stock
+python3 scripts/qa-memory-macos.py --output-directory dist/memory-fixed
+# 真实窗口显示／最小化／隐藏循环，普通 GC，500 条滚动日志。
+python3 scripts/qa-memory-macos.py --output-directory dist/memory-soak --seconds 1800
+# 只读观察指定的已运行进程 8 小时，不重启或改变服务状态。
+python3 scripts/observe-memory-macos.py --pid PID --output-directory dist/memory-observation
+```
+
+Debug GUI 的内存验收使用独立应用生命周期，不加载用户设置、不发现真实 Herdr 会话、不连接或切换 Clash。结果写入指定目录中的 `result.json` 和 `samples.jsonl`。进程观察的 `summary.json` 会实时更新，结束后状态为 `complete`；进程退出或 PID 被复用会记录 `interrupted`。观察程序只记录指标，不会自动重启应用。
+
 ## 工程结构
 
 | 工程 | 职责 |

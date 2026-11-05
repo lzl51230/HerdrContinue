@@ -23,8 +23,8 @@ public sealed class AgentRowViewModel(AgentRow row) : ObservableModel
     public string Detail => Row.Detail;
     public string Attempts => Row.Attempts.ToString();
     public string Countdown => Row.Deadline is { } deadline ? $"{Math.Max(0, (int)Math.Ceiling(deadline - new MonotonicClock().Now))} 秒后复核" : "";
-    public void Update(AgentRow value) { Row = value; Changed(""); }
-    public void Tick() => Changed(nameof(Countdown));
+    public void Update(AgentRow value) { if (Row == value) return; Row = value; Changed(""); }
+    public void Tick() { if (Row.Deadline is not null) Changed(nameof(Countdown)); }
 }
 
 public sealed class MainViewModel : ObservableModel, IAsyncDisposable
@@ -38,6 +38,9 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private Task? initialization, disposal;
     private bool initialized;
+    private readonly object snapshotSync = new();
+    private MonitorSnapshot? pendingSnapshot;
+    private bool snapshotScheduled, disposed;
     public string CooldownDescription => $"独立冷却 {engine.CooldownSeconds} 秒 · 首次立即介入";
     public void SetCooldownSeconds(int seconds) { engine.SetCooldownSeconds(seconds); Changed(nameof(CooldownDescription)); }
     public bool ProxyRecoveryEnabled => engine.Snapshot.ProxyRecoveryEnabled;
@@ -52,6 +55,7 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     public ICommand ToggleCommand { get; }
 #if DEBUG
     internal MonitorSnapshot QaSnapshot => engine.Snapshot;
+    internal void QaPublishSnapshot(MonitorSnapshot value) => OnSnapshot(value);
 #endif
     public ObservableCollection<AgentRowViewModel> Rows { get; } = [];
     public ObservableCollection<MonitorEvent> Events { get; } = [];
@@ -136,7 +140,29 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
         await regionSettings.RestoreAsync(ct);
         uiError = null; Changed("");
     }
-    private void OnSnapshot(MonitorSnapshot value) => Dispatcher.UIThread.Post(() => Apply(value));
+    private void OnSnapshot(MonitorSnapshot value)
+    {
+        lock (snapshotSync)
+        {
+            if (disposed) return;
+            pendingSnapshot = value;
+            if (snapshotScheduled) return;
+            snapshotScheduled = true;
+        }
+        Dispatcher.UIThread.Post(ApplyPendingSnapshot);
+    }
+    private void ApplyPendingSnapshot()
+    {
+        MonitorSnapshot? value;
+        lock (snapshotSync)
+        {
+            value = pendingSnapshot;
+            pendingSnapshot = null;
+            snapshotScheduled = false;
+            if (disposed) return;
+        }
+        if (value is not null) Apply(value);
+    }
     private void Apply(MonitorSnapshot value)
     {
         snapshot = value;
@@ -148,9 +174,24 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
             if (!existing.TryGetValue(row.Id, out var model)) { model = new(row); Rows.Insert(i, model); }
             else { model.Update(row); var current = Rows.IndexOf(model); if (current != i) Rows.Move(current, i); }
         }
-        Events.Clear(); foreach (var valueEvent in value.Events.Reverse()) Events.Add(valueEvent);
-        Delays.Clear(); foreach (var delay in value.Proxy.Delays) Delays.Add($"{RegionResolver.ForId(delay.RegionId ?? "")?.Name ?? "未知地区"} · {delay.SourceName} · {delay.OriginalName ?? delay.Name}     {delay.Milliseconds} ms");
+        Synchronize(Events, value.Events.TakeLast(500).Reverse().ToArray());
+        Synchronize(Delays, value.Proxy.Delays.Select(delay => $"{RegionResolver.ForId(delay.RegionId ?? "")?.Name ?? "未知地区"} · {delay.SourceName} · {delay.OriginalName ?? delay.Name}     {delay.Milliseconds} ms").ToArray());
         Changed("");
+    }
+    private static void Synchronize<T>(ObservableCollection<T> items, IReadOnlyList<T> desired)
+    {
+        var wanted = desired.ToHashSet();
+        for (var i = items.Count - 1; i >= 0; i--) if (!wanted.Contains(items[i])) items.RemoveAt(i);
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (i < items.Count && EqualityComparer<T>.Default.Equals(items[i], desired[i])) continue;
+            var existing = -1;
+            for (var j = i + 1; j < items.Count; j++)
+                if (EqualityComparer<T>.Default.Equals(items[j], desired[i])) { existing = j; break; }
+            if (existing >= 0) items.Move(existing, i);
+            else items.Insert(i, desired[i]);
+        }
+        while (items.Count > desired.Count) items.RemoveAt(items.Count - 1);
     }
     public async Task ToggleAsync()
     {
@@ -178,6 +219,7 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     public ValueTask DisposeAsync() => new(disposal ??= DisposeCoreAsync());
     private async Task DisposeCoreAsync()
     {
+        lock (snapshotSync) { disposed = true; pendingSnapshot = null; }
         lifetime.Cancel(); timer.Stop(); engine.SnapshotChanged -= OnSnapshot;
         await engine.DisposeAsync();
         if (initialization is not null) await initialization;

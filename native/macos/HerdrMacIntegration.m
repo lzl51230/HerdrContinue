@@ -1,6 +1,9 @@
 #import <AppKit/AppKit.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <Carbon/Carbon.h>
+#ifdef HDAC_QA
+#import <mach/mach.h>
+#endif
 
 // All exports are called on the application's main thread, inside its signed bundle.
 int hdac_login_status(void) { return (int)SMAppService.mainAppService.status; }
@@ -43,6 +46,34 @@ static void ShowApprovalPrompt(int qaResponse)
 void hdac_login_prompt(void) { ShowApprovalPrompt(-1); }
 #ifdef HDAC_QA
 void hdac_login_qa_prompt(int settings) { ShowApprovalPrompt(settings); }
+
+// Walk only this process's tree. No system accessibility permission or external app is used.
+static int WalkAccessibility(id element, NSMutableSet *visited, int depth)
+{
+    if (!element || depth > 40 || visited.count > 10000 || [visited containsObject:element]) return 0;
+    [visited addObject:element];
+    if ([element respondsToSelector:@selector(accessibilityParent)]) (void)[element accessibilityParent];
+    if ([element respondsToSelector:@selector(accessibilityFrame)]) (void)[element accessibilityFrame];
+    int count = 1;
+    if ([element respondsToSelector:@selector(accessibilityChildren)])
+        for (id child in [element accessibilityChildren]) count += WalkAccessibility(child, visited, depth + 1);
+    return count;
+}
+int hdac_qa_walk_accessibility(void)
+{
+    @autoreleasepool {
+        NSMutableSet *visited = [NSMutableSet new];
+        int count = 0;
+        for (NSWindow *window in NSApp.windows) count += WalkAccessibility(window, visited, 0);
+        return count;
+    }
+}
+uint64_t hdac_qa_physical_footprint(void)
+{
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    return task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS ? info.phys_footprint : 0;
+}
 #endif
 
 typedef void (*LaunchCallback)(int autoStart);

@@ -92,6 +92,7 @@ public sealed class DesktopApplicationController
     }
     private void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is not (null or "" or nameof(MainViewModel.Running) or nameof(MainViewModel.CanToggle) or nameof(MainViewModel.FeatureSummary))) return;
         toggle.Header = model.Running ? "停止服务" : "启动服务"; toggle.IsEnabled = !IsExiting && model.CanToggle;
         status.Header = model.Running ? model.FeatureSummary : "服务已停止";
         tray.ToolTipText = "Herdr 自动续接 · " + (model.Running ? model.FeatureSummary : "已停止");

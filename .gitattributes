@@ -1,0 +1,2 @@
+# Preserve the original whitespace in upstream patch context.
+native/avalonia/*.patch -whitespace

@@ -18,13 +18,36 @@
   <PropertyGroup>
     <MacNativeOutput>$(BaseIntermediateOutputPath)$(Configuration)/native/libHerdrMacIntegration.dylib</MacNativeOutput>
     <MacNativeDefines Condition="'$(Configuration)' == 'Debug'">-DHDAC_QA</MacNativeDefines>
+    <UsePatchedAvaloniaNative Condition="'$(UsePatchedAvaloniaNative)' == ''">true</UsePatchedAvaloniaNative>
+    <PatchedAvaloniaNativeOutput>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)$(Configuration)/native/libAvaloniaNative.dylib</PatchedAvaloniaNativeOutput>
   </PropertyGroup>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-'))">
     <None Include="$(MacNativeOutput)" Link="libHerdrMacIntegration.dylib" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../native/avalonia/LICENSE.md" Link="AvaloniaNative-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="BuildMacIntegration" BeforeTargets="AssignTargetPaths" Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-'))"
           Inputs="../../native/macos/HerdrMacIntegration.m;$(MSBuildProjectFullPath)" Outputs="$(MacNativeOutput)">
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(MacNativeOutput)'))" />
     <Exec Command="xcrun clang -dynamiclib -fobjc-arc -Wall -Wextra -Werror $(MacNativeDefines) -mmacosx-version-min=14.0 -arch arm64 -arch x86_64 -framework AppKit -framework ServiceManagement -framework Carbon &quot;$(MSBuildProjectDirectory)/../../native/macos/HerdrMacIntegration.m&quot; -o &quot;$(MacNativeOutput)&quot;" />
+  </Target>
+  <!-- Keep both runtime layouts covered: framework-dependent builds use runtimes/osx/native;
+       self-contained publishes put the same asset at the root. Never modify the NuGet cache. -->
+  <Target Name="BuildPatchedAvaloniaNative" BeforeTargets="CopyFilesToOutputDirectory;Publish"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-')) And '$(UsePatchedAvaloniaNative)' == 'true'">
+    <Error Condition="'%(PackageReference.Identity)' == 'Avalonia.Desktop' And '%(PackageReference.Version)' != '12.1.4'"
+           Text="The patched native backend is pinned to Avalonia 12.1.4. Update and verify the native source and patch before changing the managed version." />
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/../../scripts/build-avalonia-native.py&quot; --output &quot;$(PatchedAvaloniaNativeOutput)&quot;" />
+  </Target>
+  <Target Name="CopyPatchedAvaloniaNativeToOutput" AfterTargets="CopyFilesToOutputDirectory" DependsOnTargets="BuildPatchedAvaloniaNative"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-')) And '$(UsePatchedAvaloniaNative)' == 'true'">
+    <Copy SourceFiles="$(PatchedAvaloniaNativeOutput)" DestinationFiles="$(TargetDir)libAvaloniaNative.dylib" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PatchedAvaloniaNativeOutput)" DestinationFiles="$(TargetDir)runtimes/osx/native/libAvaloniaNative.dylib" SkipUnchangedFiles="true"
+          Condition="Exists('$(TargetDir)runtimes/osx/native/libAvaloniaNative.dylib')" />
+  </Target>
+  <Target Name="CopyPatchedAvaloniaNativeToPublish" AfterTargets="Publish" DependsOnTargets="BuildPatchedAvaloniaNative"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) And !$(RuntimeIdentifier.StartsWith('win-')) And '$(UsePatchedAvaloniaNative)' == 'true'">
+    <Copy SourceFiles="$(PatchedAvaloniaNativeOutput)" DestinationFiles="$(PublishDir)libAvaloniaNative.dylib" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PatchedAvaloniaNativeOutput)" DestinationFiles="$(PublishDir)runtimes/osx/native/libAvaloniaNative.dylib" SkipUnchangedFiles="true"
+          Condition="Exists('$(PublishDir)runtimes/osx/native/libAvaloniaNative.dylib')" />
   </Target>
 </Project>

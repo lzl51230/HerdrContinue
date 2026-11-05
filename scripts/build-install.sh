@@ -12,6 +12,8 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 for project in src/HerdrAutoContinue src/Watchdog.Probe; do
     "$dotnet_bin" publish "$project" -c Release -r "$runtime" --self-contained true -p:PublishTrimmed=false -p:DebugType=None -o "$app/Contents/MacOS"
 done
+cmp "src/HerdrAutoContinue/obj/Release/native/libAvaloniaNative.dylib" "$app/Contents/MacOS/libAvaloniaNative.dylib"
+mv "$app/Contents/MacOS/AvaloniaNative-LICENSE.txt" "$app/Contents/Resources/AvaloniaNative-LICENSE.txt"
 cp assets/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
