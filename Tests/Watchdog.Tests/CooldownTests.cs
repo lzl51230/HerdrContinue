@@ -21,8 +21,8 @@ public sealed class CooldownTests
     public async Task EachSwitchWaitsRemainingTimeAndSettingsWakeWaiter(bool extend)
     {
         var time=new ManualTime();var service=new FakeClash {Healthy=false,HealthyNodes=[JapanSlow]};await using var proxy=new ProxyMonitor(service,new(time));proxy.Start(false);
-        var check=proxy.CheckNowAsync();try{
-            await Eventually(()=>proxy.Status.Phase==ProxyPhase.CoolingDown);Assert.Equal(new[]{JapanFast},service.Selected);Assert.Equal(5,proxy.Status.SwitchDeadline);
+        var check=proxy.CheckRecoveryAsync();try{
+            await Eventually(()=>proxy.Status.Phase==ProxyPhase.CoolingDown);Assert.False(proxy.Status.ValidatingCandidate);Assert.Equal(new[]{JapanFast},service.Selected);Assert.Equal(5,proxy.Status.SwitchDeadline);
             time.Now=3;proxy.SetCooldownSeconds(extend?10:1);
             if(extend){await Eventually(()=>proxy.Status.SwitchDeadline==10);time.Now=9.999;Assert.Single(service.Selected);time.Now=10;}
             await check.WaitAsync(TimeSpan.FromSeconds(3));Assert.Equal(new[]{JapanFast,JapanSlow},service.Selected);Assert.True(proxy.PermitsAgent);
@@ -31,7 +31,7 @@ public sealed class CooldownTests
     [Theory] [InlineData("stop")] [InlineData("preferences")] [InlineData("manual")] [InlineData("healthy")]
     public async Task WaitingSwitchRevalidatesAndCancels(string action)
     {
-        var time=new ManualTime();var service=new FakeClash {Healthy=false,HealthyNodes=[JapanSlow]};await using var proxy=new ProxyMonitor(service,new(time));proxy.Start(false);var check=proxy.CheckNowAsync();
+        var time=new ManualTime();var service=new FakeClash {Healthy=false,HealthyNodes=[JapanSlow]};await using var proxy=new ProxyMonitor(service,new(time));proxy.Start(false);var check=proxy.CheckRecoveryAsync();
         try{
             await Eventually(()=>proxy.Status.Phase==ProxyPhase.CoolingDown);
             if(action=="stop")await proxy.StopAsync();
@@ -49,11 +49,11 @@ public sealed class CooldownTests
         service.Probe = (node, _) =>
         {
             seen.TryAdd(node, watch.Elapsed.TotalSeconds);
-            return Task.FromResult(new ProxyProbe(node == JapanSlow, 100));
+            return Task.FromResult(new ProxyProbe(node == JapanSlow, 100, ConnectionSeconds: node == JapanSlow ? 60 : 0));
         };
         await using var proxy = new ProxyMonitor(service);
         proxy.SetCooldownSeconds(1); proxy.Start(false);
-        await proxy.CheckNowAsync().WaitAsync(TimeSpan.FromSeconds(8));
+        await proxy.CheckRecoveryAsync().WaitAsync(TimeSpan.FromSeconds(8));
         Assert.Equal(new[] { JapanFast, JapanSlow }, service.Selected);
         Assert.True(seen[JapanSlow] - seen[JapanFast] >= .98);
     }

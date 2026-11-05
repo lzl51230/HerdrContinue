@@ -59,13 +59,11 @@ public sealed class LocalHttpTransport(ILocalConnectionFactory? connections = nu
 }
 
 public sealed class LiveClashService(IClashEndpointDiscovery? discovery = null, ILocalConnectionFactory? connections = null,
-    Uri? proxyAddress = null, IReadOnlyList<string>? probeUrls = null, TimeProvider? timeProvider = null, ClashProfileRepository? profiles = null, string? runtimeStateDirectory = null) : IClashService
+    Uri? proxyAddress = null, Uri? probeAddress = null, TimeProvider? timeProvider = null, ClashProfileRepository? profiles = null, string? runtimeStateDirectory = null) : IClashService
 {
     private readonly IClashEndpointDiscovery discovery = discovery ?? new ClashEndpointDiscovery();
     private readonly LocalHttpTransport http = new(connections);
-    private readonly Uri proxyAddress = proxyAddress ?? new Uri("http://127.0.0.1:7890");
-    private readonly IReadOnlyList<string> probeUrls = probeUrls ?? ProxyPolicy.TestUrls;
-    private readonly TimeProvider timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly OpenAiConnectionProbe probe = new(proxyAddress, probeAddress, timeProvider);
 
     private readonly ClashProfileRepository profiles = profiles ?? new();
     private readonly SemaphoreSlim runtimeGate = new(1, 1);
@@ -189,49 +187,14 @@ public sealed class LiveClashService(IClashEndpointDiscovery? discovery = null, 
             ? "未连接到管理 7890 端口的 Clash Party，稍后重试" : "发现多个 Clash 控制接口，暂停切换以避免误操作");
     }
 
-    public async Task<ProxyProbe> ProbeProxyAsync(CancellationToken cancellationToken)
-    {
-        using var round = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        using var handler = new SocketsHttpHandler
-        {
-            Proxy = new WebProxy(proxyAddress, false) { BypassList = [] }, UseProxy = true, AllowAutoRedirect = false,
-            ConnectTimeout = TimeSpan.FromSeconds(3), PooledConnectionLifetime = TimeSpan.Zero
-        };
-        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
-        var tasks = probeUrls.Select(url => LatencyPolicy.CheckAsync(async ct =>
-        {
-            var start = timeProvider.GetTimestamp();
-            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (response.StatusCode != HttpStatusCode.NoContent) throw new HerdrException($"代理探测失败（HTTP {(int)response.StatusCode}）");
-            return timeProvider.GetElapsedTime(start).TotalMilliseconds;
-        }, round.Token)).ToList();
-        var all = tasks.ToArray();
-        ProxyProbe result = new(false, Failure: ProxyProbeFailure.RequestFailed);
-        try
-        {
-            while (tasks.Count > 0)
-            {
-                var finished = await Task.WhenAny(tasks); tasks.Remove(finished);
-                var probe = await finished;
-                if (probe.Healthy) { result = probe; break; }
-                if (probe.Failure == ProxyProbeFailure.SlowTimeout) result = probe;
-            }
-        }
-        finally
-        {
-            await round.CancelAsync();
-            try { await Task.WhenAll(all); }
-            catch (OperationCanceledException) when (round.IsCancellationRequested) { }
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        return result;
-    }
+    public Task<ProxyProbe> ProbeProxyAsync(CancellationToken cancellationToken) => probe.HeartbeatAsync(cancellationToken);
+    public Task ResetProbeConnectionsAsync(CancellationToken cancellationToken) => probe.ResetAsync(cancellationToken);
     public async Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken cancellationToken)
     {
-        var resource = $"/proxies/{Uri.EscapeDataString(node)}/delay?url={Uri.EscapeDataString(url)}&timeout=5000&expected=204";
-        var result = await GetAsync(endpoint, resource, cancellationToken, TimeSpan.FromSeconds(6));
+        var resource = $"/proxies/{Uri.EscapeDataString(node)}/delay?url={Uri.EscapeDataString(url)}&timeout=10000&expected=401";
+        var result = await GetAsync(endpoint, resource, cancellationToken, TimeSpan.FromSeconds(12));
         var delay = result.GetProperty("delay").GetInt32();
-        return delay is > 0 and <= 5000 ? delay : throw new HerdrException("节点测速失败");
+        return delay is > 0 and <= 10000 ? delay : throw new HerdrException("节点测速失败");
     }
     public async Task SelectAsync(string node, ClashSnapshot snapshot, CancellationToken cancellationToken)
     {

@@ -76,16 +76,21 @@ public sealed class MainViewModel : ObservableModel, IAsyncDisposable
     public string ProxyTitle => !ProxyRecoveryEnabled ? "Clash 自动恢复已关闭" : snapshot.Proxy.Phase switch
     {
         ProxyPhase.Stopped => "代理监控已停止", ProxyPhase.Checking => "检查代理", ProxyPhase.Healthy => "代理正常",
-        ProxyPhase.Suspect => "代理异常，等待复核", ProxyPhase.Testing => "地区节点测速中", ProxyPhase.Switching => "切换代理节点",
+        ProxyPhase.Suspect => "长连接断开，正在重连", ProxyPhase.Testing => "地区节点测速中", ProxyPhase.Switching => "节点长连接验收中",
         ProxyPhase.CoolingDown => "节点切换冷却中", ProxyPhase.Retrying => "等待重新测速", _ => "自动切换暂不可用"
     };
-    public string ProxyDetail => !ProxyRecoveryEnabled ? "不自动探测、测速或切换节点；agent 可独立续接。" : snapshot.Proxy.Detail;
+    public string ProxyDetail => !ProxyRecoveryEnabled ? "不自动探测、测速或切换节点；agent 可独立续接。" : snapshot.Proxy.Detail +
+        " · 目标 chatgpt.com · 无凭据 TCP/TLS 检查" + (snapshot.Proxy.DisconnectReason is { } reason ? " · 上次断线：" + reason : "");
     public string SelectedNode => "当前节点：" + (snapshot.Proxy.Sources.SelectMany(s=>s.Nodes).FirstOrDefault(n=>n.Name==snapshot.Proxy.Selected) is { } node ? node.SourceName + " · " + node.OriginalName : snapshot.Proxy.Selected ?? "等待读取") +
         (snapshot.Proxy.CurrentRegionId is { } id ? " · " + RegionResolver.ForId(id)!.Name : "");
     public string ProxyNumbers => snapshot.Proxy.Phase == ProxyPhase.Testing
         ? $"{RegionResolver.ForId(snapshot.Proxy.TestingRegionId ?? "")?.Name} · {snapshot.Proxy.Completed} / {snapshot.Proxy.CandidateCount}"
-        : $"{SourceSummary} · 已选 {RegionPreferences.PriorityRegionIds.Count} 个地区" + (snapshot.Proxy.LatencyMs is { } latency ? $"  ·  连通检查 {latency} ms" : "");
-    public string ProxyCountdown => !ProxyRecoveryEnabled ? "" : snapshot.Proxy.Phase == ProxyPhase.CoolingDown && snapshot.Proxy.SwitchDeadline is { } deadline
+        : $"{SourceSummary} · 已选 {RegionPreferences.PriorityRegionIds.Count} 个地区" + (snapshot.Proxy.LatencyMs is { } latency ? $"  ·  心跳 {latency} ms" : "");
+    public string ProxyCountdown => !ProxyRecoveryEnabled ? "" : snapshot.Proxy.ValidatingCandidate
+        ? $"长连接 {Math.Floor(snapshot.Proxy.ConnectionSeconds)} / 10 秒"
+        : snapshot.Proxy.Phase == ProxyPhase.Healthy
+        ? $"长连接已验证 {Math.Floor(snapshot.Proxy.ConnectionSeconds)} 秒 · 未满 60 秒失败 {snapshot.Proxy.ConsecutiveFailures}/2"
+        : snapshot.Proxy.Phase == ProxyPhase.CoolingDown && snapshot.Proxy.SwitchDeadline is { } deadline
         ? $"{Math.Max(0, (int)Math.Ceiling(deadline - new MonotonicClock().Now))} 秒后复核切换"
         : snapshot.Proxy.Phase is ProxyPhase.Retrying or ProxyPhase.Suspect or ProxyPhase.Unavailable && snapshot.Proxy.NextCheck is { } next
         ? $"{Math.Max(0, (int)Math.Ceiling(next - new MonotonicClock().Now))} 秒后重试" : "";

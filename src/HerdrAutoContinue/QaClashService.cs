@@ -26,7 +26,7 @@ internal sealed class QaClashService(bool recover, string directory) : IClashSer
         }
     }
     public Task<ProxyProbe> ProbeProxyAsync(CancellationToken ct)
-    { lock (sync) return Task.FromResult(new ProxyProbe(SourcesMode ? selected=="验收源B日本01" : !recover || selected == "验收香港01", 15)); }
+    { lock (sync) return Task.FromResult(new ProxyProbe(SourcesMode ? selected=="验收源B日本01" : !recover || selected == "验收香港01", 15, ConnectionSeconds: 60)); }
     public async Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken ct)
     {
         if (!recover && !SourcesMode) throw new InvalidOperationException("Healthy QA proxy never tests nodes");

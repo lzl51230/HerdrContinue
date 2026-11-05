@@ -32,7 +32,7 @@ public sealed class SourceTests
     [Fact] public async Task SameRegionAcrossSourcesStartsTogetherAndCanFailOverAcrossSources()
     {
         var a="source-A 日本01";var b="source-B 日本01";var excluded="source-C 日本01";
-        var state=Clash(a,names:[a,b,excluded]);
+        var state=Clash(OtherNode,names:[a,b,excluded,OtherNode]);
         state=state with { CurrentSourceId="A", Nodes=state.Nodes.ToDictionary(p=>p.Key,p=>p.Value.IsProxyLeaf ? p.Value with {SourceId=p.Key==a?"A":p.Key==b?"B":"C",OriginalName="日本01"} : p.Value) };
         var barrier=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var started=0;
         var service=new FakeClash {State=state,Healthy=false,HealthyNodes=[b], Measure=async (node,url,ct)=>{
@@ -40,9 +40,9 @@ public sealed class SourceTests
             await barrier.Task.WaitAsync(ct);return node==a?10:20;
         }};
         await using var proxy=new ProxyMonitor(service,preferences:new(["JP"],["A","B"]));proxy.Start(false);
-        await proxy.CheckNowAsync();await proxy.CheckNowAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await proxy.CheckRecoveryAsync();await proxy.CheckRecoveryAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(2,service.MaximumConcurrent);Assert.DoesNotContain(excluded,service.Tested);
-        Assert.Equal(new[]{b},service.Selected);Assert.Equal(ProxyPhase.Healthy,proxy.Status.Phase);
+        Assert.Equal(new[]{a,b},service.Selected);Assert.Equal(ProxyPhase.Healthy,proxy.Status.Phase);
     }
     [Fact] public void OriginalNodeNameControlsRegionInsteadOfSourcePrefix()
     { Assert.Equal("HK",new ClashNode("日本机场 香港01",OriginalName:"香港01").Region?.Id); }

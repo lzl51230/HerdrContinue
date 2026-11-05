@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Runtime.CompilerServices;
 
 namespace Watchdog.Core;
 
@@ -114,8 +115,10 @@ public sealed record ClashSnapshot(LocalEndpoint Endpoint, string Mode, int Mixe
     public bool HasSameSelectionContext(ClashSnapshot other) => HasSameConfiguration(other) && Selected == other.Selected && SelectionPath.SequenceEqual(other.SelectionPath);
 }
 
-public enum ProxyProbeFailure { None, RequestFailed, SlowTimeout }
-public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null, ProxyProbeFailure Failure = ProxyProbeFailure.None);
+public enum ProxyProbeFailure { None, RequestFailed }
+// Each result describes a heartbeat on one physical connection, never accumulated reconnects.
+public sealed record ProxyProbe(bool Healthy, int? LatencyMs = null, ProxyProbeFailure Failure = ProxyProbeFailure.None,
+    double ConnectionSeconds = 0, string? Detail = null, double? HeartbeatAt = null);
 public sealed record NodeDelay(string Name, int Milliseconds, string? RegionId = null, string? SourceName = null, string? OriginalName = null);
 public enum ProxyPhase { Stopped, Checking, Healthy, Suspect, Testing, Switching, CoolingDown, Retrying, Unavailable }
 public sealed record ProxyStatus
@@ -125,6 +128,10 @@ public sealed record ProxyStatus
     public string Detail { get; init; } = "启动服务后检查 127.0.0.1:7890";
     public double? HealthyAt { get; init; }
     public int? LatencyMs { get; init; }
+    public double ConnectionSeconds { get; init; }
+    public int ConsecutiveFailures { get; init; }
+    public string? DisconnectReason { get; init; }
+    public bool ValidatingCandidate { get; init; }
     public int CandidateCount { get; init; }
     public int Completed { get; init; }
     public int Round { get; init; }
@@ -140,7 +147,8 @@ public sealed record ProxyStatus
     public string? CurrentSourceId { get; init; }
     public bool CatalogueLoaded { get; init; }
     public string? CatalogueError { get; init; }
-    public bool PermitsAgent(double now) => Phase == ProxyPhase.Healthy && HealthyAt is { } at && now >= at && now - at <= 20;
+    public bool PermitsAgent(double now) => Phase == ProxyPhase.Healthy && !ValidatingCandidate && HealthyAt is { } at &&
+        now >= at && now - at < ProxyPolicy.SilenceTimeout.TotalSeconds;
 }
 
 public interface IClashService
@@ -149,6 +157,19 @@ public interface IClashService
     Task RestoreSourcesAsync(CancellationToken ct) => Task.CompletedTask;
     Task<ClashSnapshot> SnapshotAsync(CancellationToken cancellationToken);
     Task<ProxyProbe> ProbeProxyAsync(CancellationToken cancellationToken);
+    async IAsyncEnumerable<ProxyProbe> ObserveProxyConnectionAsync(TimeProvider timeProvider,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var heartbeat = await ProbeProxyAsync(cancellationToken);
+            yield return heartbeat;
+            if (!heartbeat.Healthy) yield break;
+            await Task.Delay(ProxyPolicy.HeartbeatInterval, timeProvider, cancellationToken);
+        }
+    }
+    Task ResetProbeConnectionsAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken cancellationToken);
     Task SelectAsync(string node, ClashSnapshot snapshot, CancellationToken cancellationToken);
 }
@@ -156,7 +177,10 @@ public interface IClashService
 public static class ProxyPolicy
 {
     public const int MaximumLatencyMs = 800;
-    public static readonly string[] TestUrls = ["https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204"];
+    public const string TestUrl = "https://chatgpt.com/backend-api/codex/models";
+    public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan SilenceTimeout = TimeSpan.FromSeconds(10);
+    public const int MaintenanceSeconds = 60, CandidateSeconds = 10;
     public static NodeDelay[] Ranked(IEnumerable<NodeDelay> delays, ISet<string> allowed) => delays
         .Where(d => allowed.Contains(d.Name) && d.Milliseconds is > 0 and <= MaximumLatencyMs)
         .OrderBy(d => d.Milliseconds).ThenBy(d => d.Name, StringComparer.Ordinal).ToArray();

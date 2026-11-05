@@ -24,10 +24,10 @@ public sealed class ClashHttpTests
         await using var fixture = new HttpFixture(kind, request => Reply(request, () => selected, s => selected = s));
         var service = new LiveClashService(new FixedDiscovery(fixture.Endpoint)); var before = await service.SnapshotAsync(default);
         Assert.Equal(OtherNode, before.Selected); Assert.Equal(3, before.Candidates.Length);
-        Assert.Equal(42, await service.DelayAsync(JapanFast, fixture.Endpoint, ProxyPolicy.TestUrls[0], default));
+        Assert.Equal(42, await service.DelayAsync(JapanFast, fixture.Endpoint, ProxyPolicy.TestUrl, default));
         await service.SelectAsync(JapanFast, before, default); Assert.Equal(JapanFast, (await service.SnapshotAsync(default)).Selected);
         var delay = Assert.Single(fixture.Requests, r => r.Resource.Contains("/delay?"));
-        Assert.Contains(Uri.EscapeDataString(JapanFast), delay.Resource); Assert.Contains("expected=204", delay.Resource); Assert.Contains(Uri.EscapeDataString(ProxyPolicy.TestUrls[0]), delay.Resource);
+        Assert.Contains(Uri.EscapeDataString(JapanFast), delay.Resource); Assert.Contains("expected=401", delay.Resource); Assert.Contains(Uri.EscapeDataString(ProxyPolicy.TestUrl), delay.Resource);
     }
     [Theory, MemberData(nameof(TransportTests.Transports), MemberType = typeof(TransportTests))]
     public async Task UnknownAndGroupSelectionsAreRefusedBeforeHttp(EndpointKind kind)

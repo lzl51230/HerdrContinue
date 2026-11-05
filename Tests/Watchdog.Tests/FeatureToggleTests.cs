@@ -12,7 +12,7 @@ public sealed class FeatureToggleTests
         await using var m=new MonitorEngine(service,clash);
         await m.ApplyAppSettingsAsync(new(ProxyRecoveryEnabled:proxy,AgentRecoveryEnabled:agent));
         Assert.False(m.Snapshot.Running);Assert.False(m.Proxy.Running);
-        await m.StartAsync(false);await m.Proxy.CheckNowAsync();await m.ScanNowAsync();
+        await m.StartAsync(false);await m.Proxy.CheckRecoveryAsync();await m.ScanNowAsync();
         if(agent) await Eventually(()=>service.Sent==1);
         else {Assert.Single(m.Snapshot.Rows);Assert.Contains("自动续接已关闭",m.Snapshot.Rows[0].Detail);Assert.Null(m.Snapshot.Rows[0].Deadline);Assert.Equal(0,service.Sent);}
         Assert.Equal(proxy,m.Proxy.Running);Assert.Equal(proxy,clash.Selected.Count==1);Assert.Equal(proxy,m.Snapshot.ProxyRecoveryEnabled);
@@ -20,7 +20,7 @@ public sealed class FeatureToggleTests
     [Fact] public async Task DisableCancelsRevalidationThenReenableUsesFreshObservation()
     {
         var service=new FakeHerdr {SlowRefresh=true};await using var m=new MonitorEngine(service,new FakeClash());
-        await m.StartAsync(false);await m.Proxy.CheckNowAsync();await m.ScanNowAsync();await service.RefreshStarted.Task;
+        await m.StartAsync(false);await m.Proxy.CheckRecoveryAsync();await m.ScanNowAsync();await service.RefreshStarted.Task;
         await m.ApplyAppSettingsAsync(new(AgentRecoveryEnabled:false)).WaitAsync(TimeSpan.FromSeconds(3));
         Assert.True(m.Proxy.Running);Assert.Equal(0,service.Sent);Assert.Null(m.Snapshot.Rows[0].Deadline);
         service.SlowRefresh=false;await m.ApplyAppSettingsAsync(new());await m.ScanNowAsync();await Eventually(()=>service.Sent==1);
@@ -30,7 +30,7 @@ public sealed class FeatureToggleTests
     [Fact] public async Task DisablingProxyDrainsMeasurementsAndReleasesAgentHealthGate()
     {
         var clash=new FakeClash {Healthy=false,SlowTests=true};var service=new FakeHerdr();await using var m=new MonitorEngine(service,clash);
-        await m.StartAsync(false);var check=m.Proxy.CheckNowAsync();await Eventually(()=>clash.ActiveTests>0);
+        await m.StartAsync(false);var check=m.Proxy.CheckRecoveryAsync();await Eventually(()=>clash.ActiveTests>0);
         await m.ScanNowAsync();Assert.Equal(0,service.Sent);
         await m.ApplyAppSettingsAsync(new(ProxyRecoveryEnabled:false)).WaitAsync(TimeSpan.FromSeconds(3));await check;
         Assert.Equal(0,clash.ActiveTests);Assert.Empty(clash.Selected);await m.ScanNowAsync();await Eventually(()=>service.Sent==1);
@@ -67,13 +67,13 @@ public sealed class FeatureToggleTests
     {
         var service=new FakeClash();await using var proxy=new ProxyMonitor(service);
         proxy.Start(false);await proxy.SetRecoveryEnabledAsync(false);proxy.Start(false);
-        Assert.False(proxy.Running);await proxy.CheckNowAsync();Assert.Empty(service.Tested);
-        await proxy.SetRecoveryEnabledAsync(true);Assert.False(proxy.Running);proxy.Start(false);await proxy.CheckNowAsync();Assert.True(proxy.PermitsAgent);
+        Assert.False(proxy.Running);await proxy.CheckRecoveryAsync();Assert.Empty(service.Tested);
+        await proxy.SetRecoveryEnabledAsync(true);Assert.False(proxy.Running);proxy.Start(false);await proxy.CheckRecoveryAsync();Assert.True(proxy.PermitsAgent);
     }
     [Fact] public async Task ProxyRecoveryContinuesWithoutHerdr()
     {
         var clash=new FakeClash {Healthy=false,HealthyNodes=[JapanFast]};await using var m=new MonitorEngine(new FakeHerdr {Offline=true},clash);
-        await m.ApplyAppSettingsAsync(new(AgentRecoveryEnabled:false));await m.StartAsync(false);await m.ScanNowAsync();await m.Proxy.CheckNowAsync();
+        await m.ApplyAppSettingsAsync(new(AgentRecoveryEnabled:false));await m.StartAsync(false);await m.ScanNowAsync();await m.Proxy.CheckRecoveryAsync();
         Assert.True(m.Proxy.PermitsAgent);Assert.Equal(new[]{JapanFast},clash.Selected);
     }
     [Fact] public async Task DisabledProxyInitializationOnlyReadsLocalPreferences()

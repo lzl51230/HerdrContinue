@@ -7,12 +7,26 @@ try
     var service = new LiveHerdrService();
     if (args.Contains("--clash-readonly"))
     {
-        var clash = new LiveClashService();
-        var snapshot = await clash.SnapshotAsync(CancellationToken.None);
-        var probe = await clash.ProbeProxyAsync(CancellationToken.None);
-        Console.WriteLine($"Clash: mode={snapshot.Mode}, mixed-port={snapshot.MixedPort}, selected={snapshot.Selected}, regions={snapshot.Regions.Length}, recognized leaves={snapshot.Candidates.Length}, unknown={snapshot.Leaves.Length - snapshot.Candidates.Length}");
-        foreach (var region in snapshot.Regions) Console.WriteLine($"  {region.Region.Id} {region.Region.Name}: {region.NodeCount}");
-        Console.WriteLine($"Proxy reachable={probe.Healthy}, latency={probe.LatencyMs} ms, failure={probe.Failure}; no node testing or switching performed");
+        IClashService clash = new LiveClashService();
+        var observeIndex = Array.IndexOf(args, "--observe-seconds");
+        var seconds = 0;
+        if (observeIndex >= 0 && (observeIndex + 1 >= args.Length || !int.TryParse(args[observeIndex + 1], out seconds) || seconds is < 0 or > 3600))
+            throw new HerdrException("--observe-seconds must be an integer from 0 to 3600");
+        try
+        {
+            var snapshot = await clash.SnapshotAsync(CancellationToken.None);
+            Console.WriteLine($"Clash: mode={snapshot.Mode}, mixed-port={snapshot.MixedPort}, selected={snapshot.Selected}, regions={snapshot.Regions.Length}, recognized leaves={snapshot.Candidates.Length}, unknown={snapshot.Leaves.Length - snapshot.Candidates.Length}");
+            foreach (var region in snapshot.Regions) Console.WriteLine($"  {region.Region.Id} {region.Region.Name}: {region.NodeCount}");
+            Console.WriteLine($"Codex target={ProxyPolicy.TestUrl}; credential-free TCP/TLS only; no node testing or switching performed");
+            await foreach (var probe in clash.ObserveProxyConnectionAsync(TimeProvider.System, CancellationToken.None))
+            {
+                var current = await clash.SnapshotAsync(CancellationToken.None);
+                if (!snapshot.HasSameSelectionContext(current)) throw new HerdrException("Clash selection changed; observation discarded");
+                Console.WriteLine($"reachable={probe.Healthy}, heartbeat={probe.LatencyMs} ms, connection={probe.ConnectionSeconds:F1} s, failure={probe.Detail}");
+                if (!probe.Healthy || probe.ConnectionSeconds >= seconds) break;
+            }
+        }
+        finally { await clash.ResetProbeConnectionsAsync(CancellationToken.None); }
     }
     else if (args.Contains("--monitor-test"))
     {

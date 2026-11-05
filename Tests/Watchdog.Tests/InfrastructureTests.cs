@@ -21,10 +21,11 @@ public sealed class InfrastructureTests
             {
                 using var client = await listener.AcceptTcpClientAsync(); using var stream = client.GetStream();
                 var line = await LocalFixture.ReadLineAsync(stream, default);
-                await stream.WriteAsync("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray()); return line;
+                await stream.WriteAsync("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"u8.ToArray()); return line;
             });
-            var service = new LiveClashService(proxyAddress: new Uri($"http://127.0.0.1:{port}"), probeUrls: ["http://watchdog.invalid/probe"]);
+            var service = new LiveClashService(proxyAddress: new Uri($"http://127.0.0.1:{port}"), probeAddress: new Uri("http://watchdog.invalid/probe"));
             Assert.True((await service.ProbeProxyAsync(default)).Healthy);
+            await service.ResetProbeConnectionsAsync(default);
             Assert.StartsWith("GET http://watchdog.invalid/probe HTTP/1.1", await request.WaitAsync(TimeSpan.FromSeconds(3)));
         }
         finally { Environment.SetEnvironmentVariable("NO_PROXY", old); }
@@ -33,7 +34,7 @@ public sealed class InfrastructureTests
     {
         using var target = new TcpListener(IPAddress.Loopback, 0); target.Start();
         using var closed = new TcpListener(IPAddress.Loopback, 0); closed.Start(); var port = ((IPEndPoint)closed.LocalEndpoint).Port; closed.Stop();
-        var service = new LiveClashService(proxyAddress: new Uri($"http://127.0.0.1:{port}"), probeUrls: [$"http://127.0.0.1:{((IPEndPoint)target.LocalEndpoint).Port}/probe"]);
+        var service = new LiveClashService(proxyAddress: new Uri($"http://127.0.0.1:{port}"), probeAddress: new Uri($"http://127.0.0.1:{((IPEndPoint)target.LocalEndpoint).Port}/probe"));
         Assert.False((await service.ProbeProxyAsync(default)).Healthy); Assert.False(target.Pending());
     }
     [Fact] public void TranscriptReadsUnicodeAndCrLfAndRejectsSiblingDirectory()

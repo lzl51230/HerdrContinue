@@ -129,7 +129,7 @@ public sealed class MainWindow : Window
     {
         var window = new Window { Title = model.DelayTitle, Width = 530, Height = 330, MinWidth = 420, MinHeight = 240,
             Content = new StackPanel { Margin = new(20), Spacing = 12, Children = { Text(model.DelayTitle, 18, FontWeight.SemiBold),
-                new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("同地区全部并行测速；连续两次超过 800 ms 视为超时。", 12, color: Secondary) } } };
+                new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("同地区并行测速，≤800 ms 入选；切换后须保持 10 秒长连接。", 12, color: Secondary) } } };
         window.ShowDialog(this);
         return window;
     }

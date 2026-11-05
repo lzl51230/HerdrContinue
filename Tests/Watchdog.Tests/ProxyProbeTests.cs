@@ -1,6 +1,10 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Watchdog.Core;
 using Watchdog.Infrastructure;
@@ -10,86 +14,74 @@ namespace Watchdog.Tests;
 
 public sealed class ProxyProbeTests
 {
-    [Theory]
-    [InlineData(800, 900, true, 1, 800)]
-    [InlineData(801, 800, true, 2, 800)]
-    [InlineData(900, 950, false, 2, null)]
-    public async Task ActualProxyRequestsApplyTheSharedLatencyRule(int first, int second, bool healthy, int requests, int? latency)
+    [Theory] [InlineData(false)] [InlineData(true)]
+    public async Task SamePhysicalConnectionIsReusedWithoutCredentials(bool tls)
     {
-        var time = new ManualTime(); var elapsed = 0; var count = 0;
-        await using var proxy = new ProbeServer((_, _) =>
+        var time = new ManualTime();
+        await using var server = new ProbeServer(tls);
+        await using var probe = server.Probe(time);
+        foreach (var second in new[] { 0, 2, 9, 18, 27, 36, 45, 54, 60 })
         {
-            time.Now = (elapsed += ++count == 1 ? first : second) / 1000d;
-            return Task.FromResult(204);
+            time.Now = second;
+            var result = await probe.HeartbeatAsync(default);
+            Assert.True(result.Healthy, result.Detail); Assert.Equal(second, result.ConnectionSeconds);
+        }
+        Assert.Equal(1, server.Connections);
+        Assert.All(server.Requests, headers =>
+        {
+            Assert.DoesNotContain("Authorization:", headers, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Cookie:", headers, StringComparison.OrdinalIgnoreCase);
         });
-        var service = new LiveClashService(proxyAddress: proxy.Address, probeUrls: ["http://watchdog.invalid/test"], timeProvider: time);
-        var result = await service.ProbeProxyAsync(default);
-        Assert.Equal(healthy, result.Healthy); Assert.Equal(latency, result.LatencyMs); Assert.Equal(requests, proxy.Requests.Count);
-        Assert.Equal(healthy ? ProxyProbeFailure.None : ProxyProbeFailure.SlowTimeout, result.Failure);
+        await probe.ResetAsync(); time.Now = 61;
+        Assert.Equal(0, (await probe.HeartbeatAsync(default)).ConnectionSeconds);
+        Assert.Equal(2, server.Connections);
+    }
+
+    [Theory] [InlineData(200)] [InlineData(302)] [InlineData(403)] [InlineData(429)] [InlineData(503)]
+    public async Task UnexpectedStatusFailsWithoutFollowingRedirect(int status)
+    {
+        await using var server = new ProbeServer(status: status);
+        await using var probe = server.Probe();
+        var result = await probe.HeartbeatAsync(default);
+        Assert.False(result.Healthy); Assert.Contains(status.ToString(), result.Detail);
+        Assert.Single(server.Requests);
     }
 
     [Theory] [InlineData(false)] [InlineData(true)]
-    public async Task UnexpectedHttpResponseIsARequestFailure(bool slowFirst)
+    public async Task SilentConnectionTimesOutAtTenSecondsAndCancellationClosesSession(bool partialBody)
     {
-        var time = new ManualTime(); var count = 0;
-        await using var proxy = new ProbeServer((_, _) =>
-        {
-            time.Now = ++count * 0.9;
-            return Task.FromResult(slowFirst && count == 1 ? 204 : 503);
-        });
-        var service = new LiveClashService(proxyAddress: proxy.Address, probeUrls: ["http://watchdog.invalid/test"], timeProvider: time);
-        var result = await service.ProbeProxyAsync(default);
-        Assert.False(result.Healthy); Assert.Equal(ProxyProbeFailure.RequestFailed, result.Failure);
-        Assert.Equal(slowFirst ? 2 : 1, proxy.Requests.Count);
+        var time = new ManualTime();
+        await using var server = new ProbeServer(hang: true, partialBody: partialBody);
+        await using var probe = server.Probe(time);
+        var checking = probe.HeartbeatAsync(default);
+        await TestData.Eventually(() => server.Requests.Count == 1);
+        time.Now = 9.999; Assert.False(checking.IsCompleted);
+        time.Now = 10;
+        Assert.False((await checking.WaitAsync(TimeSpan.FromSeconds(3))).Healthy);
+        using var cancellation = new CancellationTokenSource();
+        checking = probe.HeartbeatAsync(cancellation.Token);
+        await TestData.Eventually(() => server.Requests.Count == 2); cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => checking);
     }
 
-    [Fact] public async Task TwoAddressesRequireTwoSlowSamplesEach()
+    [Fact] public async Task ServerClosureAndAutomaticReconnectDoNotAccumulateAge()
     {
-        await using var proxy = new ProbeServer((_, _) => Task.FromResult(204));
-        string[] urls = ["http://watchdog.invalid/first", "http://watchdog.invalid/second"];
-        var service = new LiveClashService(proxyAddress: proxy.Address, probeUrls: urls, timeProvider: new AdvancingTime());
-        var result = await service.ProbeProxyAsync(default);
-        Assert.False(result.Healthy); Assert.Equal(ProxyProbeFailure.SlowTimeout, result.Failure);
-        Assert.All(urls, url => Assert.Equal(2, proxy.Requests.Count(r => r == url)));
+        var time = new ManualTime();
+        await using var server = new ProbeServer(closeAfterResponse: true);
+        await using var probe = server.Probe(time);
+        Assert.True((await probe.HeartbeatAsync(default)).Healthy);
+        time.Now = 2;
+        var result = await probe.HeartbeatAsync(default);
+        Assert.False(result.Healthy); Assert.Equal(0, result.ConnectionSeconds);
+        time.Now = 3; Assert.Equal(0, (await probe.HeartbeatAsync(default)).ConnectionSeconds);
     }
 
-    [Fact] public async Task PassingAddressCancelsAnotherAddressDuringRetest()
+    [Fact] public async Task InvalidTlsCertificateIsRejected()
     {
-        var time = new ManualTime(); var slowCalls = 0; var fastCalls = 0;
-        var retestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var proxy = new ProbeServer(async (url, ct) =>
-        {
-            if (url.EndsWith("/slow", StringComparison.Ordinal))
-            {
-                if (Interlocked.Increment(ref slowCalls) == 1) { time.Now = 0.9; return 204; }
-                retestStarted.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, ct); return 204;
-            }
-            await retestStarted.Task.WaitAsync(ct);
-            time.Now = 0.9 + Interlocked.Increment(ref fastCalls) * 0.1; return 204;
-        });
-        var service = new LiveClashService(proxyAddress: proxy.Address,
-            probeUrls: ["http://watchdog.invalid/slow", "http://watchdog.invalid/fast"], timeProvider: time);
-        var result = await service.ProbeProxyAsync(default).WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.True(result.Healthy); Assert.InRange(result.LatencyMs!.Value, 1, 800);
-        Assert.Equal(2, slowCalls); Assert.InRange(fastCalls, 1, 2);
-    }
-
-    [Fact] public async Task CallerCancellationDrainsBothAddressChecks()
-    {
-        await using var proxy = new ProbeServer(async (_, ct) => { await Task.Delay(Timeout.InfiniteTimeSpan, ct); return 204; });
-        var service = new LiveClashService(proxyAddress: proxy.Address,
-            probeUrls: ["http://watchdog.invalid/first", "http://watchdog.invalid/second"]);
-        using var cancellation = new CancellationTokenSource(); var checking = service.ProbeProxyAsync(cancellation.Token);
-        try { await TestData.Eventually(() => proxy.Requests.Count == 2); }
-        finally { cancellation.Cancel(); }
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => checking.WaitAsync(TimeSpan.FromSeconds(3)));
-    }
-
-    private sealed class AdvancingTime : TimeProvider
-    {
-        private long ticks;
-        public override long TimestampFrequency => 1000;
-        public override long GetTimestamp() => Interlocked.Add(ref ticks, 900);
+        await using var server = new ProbeServer(tls: true);
+        await using var probe = new OpenAiConnectionProbe(server.Address, server.Target);
+        Assert.False((await probe.HeartbeatAsync(default)).Healthy);
+        Assert.Empty(server.Requests);
     }
 
     private sealed class ProbeServer : IAsyncDisposable
@@ -97,39 +89,83 @@ public sealed class ProxyProbeTests
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private readonly CancellationTokenSource lifetime = new();
         private readonly ConcurrentBag<Task> handlers = [];
-        private readonly Task acceptLoop;
-        public Uri Address { get; }
+        private readonly Task accepting;
+        private readonly X509Certificate2 certificate;
+        public int Connections;
         public ConcurrentQueue<string> Requests { get; } = [];
-        public ProbeServer(Func<string, CancellationToken, Task<int>> respond)
+        public Uri Address { get; }
+        public Uri Target { get; }
+        public ProbeServer(bool tls = false, int status = 401, bool hang = false, bool closeAfterResponse = false, bool partialBody = false)
         {
+            using var key = RSA.Create(2048);
+            var request = new CertificateRequest("CN=watchdog.invalid", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("watchdog.invalid");
+            request.CertificateExtensions.Add(san.Build());
+            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
             listener.Start(); Address = new($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
-            acceptLoop = AcceptAsync();
+            Target = new($"{(tls ? "https" : "http")}://watchdog.invalid/test");
+            accepting = AcceptAsync();
             async Task AcceptAsync()
             {
                 try { while (!lifetime.IsCancellationRequested) handlers.Add(HandleAsync(await listener.AcceptTcpClientAsync(lifetime.Token))); }
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             }
-            async Task HandleAsync(TcpClient client)
+            async Task HandleAsync(TcpClient socket)
             {
-                using (client)
+                Interlocked.Increment(ref Connections);
+                using (socket)
                 {
                     try
                     {
-                        using var stream = client.GetStream();
-                        var url = (await LocalFixture.ReadLineAsync(stream, lifetime.Token)).Split(' ')[1];
-                        while ((await LocalFixture.ReadLineAsync(stream, lifetime.Token)).Length > 0) { }
-                        Requests.Enqueue(url); var status = await respond(url, lifetime.Token);
-                        await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), lifetime.Token);
+                        Stream stream = socket.GetStream();
+                        if (tls)
+                        {
+                            while ((await LocalFixture.ReadLineAsync(stream, lifetime.Token)).Length > 0) { }
+                            await stream.WriteAsync("HTTP/1.1 200 Connection established\r\n\r\n"u8.ToArray(), lifetime.Token);
+                            var ssl = new SslStream(stream);
+                            await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, lifetime.Token);
+                            stream = ssl;
+                        }
+                        await using (stream)
+                        {
+                            while (!lifetime.IsCancellationRequested)
+                            {
+                                var first = await LocalFixture.ReadLineAsync(stream, lifetime.Token);
+                                if (first.Length == 0) return;
+                                var headers = first + "\r\n"; string line;
+                                while ((line = await LocalFixture.ReadLineAsync(stream, lifetime.Token)).Length > 0) headers += line + "\r\n";
+                                Requests.Enqueue(headers);
+                                if (hang)
+                                {
+                                    if (partialBody) await stream.WriteAsync("HTTP/1.1 401 Test\r\nContent-Length: 2\r\n\r\n{"u8.ToArray(), lifetime.Token);
+                                    await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token); return;
+                                }
+                                await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Test\r\nContent-Length: 2\r\nConnection: keep-alive\r\nSet-Cookie: secret=must-not-return\r\nLocation: http://watchdog.invalid/redirect\r\n\r\n{{}}"), lifetime.Token);
+                                if (closeAfterResponse) return;
+                            }
+                        }
                     }
                     catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
                     catch (IOException) { }
+                    catch (AuthenticationException) { }
                 }
             }
         }
+        public OpenAiConnectionProbe Probe(TimeProvider? time = null)
+        {
+            var probe = new OpenAiConnectionProbe(Address, Target, time);
+            probe.TlsOptions.CertificateChainPolicy = new X509ChainPolicy
+            {
+                TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck
+            };
+            probe.TlsOptions.CertificateChainPolicy.CustomTrustStore.Add(certificate);
+            return probe;
+        }
         public async ValueTask DisposeAsync()
         {
-            await lifetime.CancelAsync(); await acceptLoop; await Task.WhenAll(handlers);
-            listener.Stop(); lifetime.Dispose();
+            await lifetime.CancelAsync(); await accepting; await Task.WhenAll(handlers);
+            listener.Stop(); certificate.Dispose(); lifetime.Dispose();
         }
     }
 }

@@ -68,7 +68,7 @@ public sealed class RegionTests
     {
         var service = Service(); service.HealthyNodes = [JapanFast, Hk, Sg];
         await using var proxy = new ProxyMonitor(service, preferences: Prefs("HK", "JP", "SG")); proxy.Start(false);
-        await proxy.CheckNowAsync();
+        await proxy.CheckRecoveryAsync();
         Assert.Equal(new[] { JapanFast }, service.Selected); Assert.All(service.Tested, n => Assert.Equal("JP", RegionResolver.Resolve(n)?.Id));
         Assert.True(proxy.PermitsAgent);
     }
@@ -76,16 +76,16 @@ public sealed class RegionTests
     {
         var service = Service(); service.Delays.Remove(JapanFast); service.Delays.Remove(JapanSlow); service.HealthyNodes = [Sg];
         await using var proxy = new ProxyMonitor(service, preferences: Prefs("HK", "JP", "SG")); proxy.Start(false);
-        await proxy.CheckNowAsync();
+        await proxy.CheckRecoveryAsync();
         Assert.Equal(new[] { Hk, HkSlow, Sg }, service.Selected);
-        Assert.All(service.Tested.Take(4), n => Assert.Equal("JP", RegionResolver.Resolve(n)?.Id));
-        Assert.DoesNotContain(service.Tested.Skip(4), n => RegionResolver.Resolve(n)?.Id == "JP"); Assert.True(proxy.PermitsAgent);
+        Assert.All(service.Tested.Take(1), n => Assert.Equal("JP", RegionResolver.Resolve(n)?.Id));
+        Assert.DoesNotContain(service.Tested.Skip(1), n => RegionResolver.Resolve(n)?.Id == "JP"); Assert.True(proxy.PermitsAgent);
     }
     [Fact] public async Task UnselectedCurrentRegionAndUnselectedFastNodesAreNeverTested()
     {
         var service = Service(OtherNode); service.HealthyNodes = [Hk, Sg];
         await using var proxy = new ProxyMonitor(service, preferences: Prefs("HK", "SG")); proxy.Start(false);
-        await proxy.CheckNowAsync();
+        await proxy.CheckRecoveryAsync();
         Assert.Equal(new[] { Hk }, service.Selected); Assert.All(service.Tested, n => Assert.Equal("HK", RegionResolver.Resolve(n)?.Id));
     }
     [Fact] public async Task SameRegionTriesNextFastestBeforeMovingToAnotherRegion()
@@ -94,23 +94,23 @@ public sealed class RegionTests
         // Use a failed current node outside the allowed regions to start at Japan.
         service.State = service.State with { Nodes = Clash(OtherNode, names: service.State.Leaves.Select(n => n.Name).ToArray()).Nodes };
         await using var proxy = new ProxyMonitor(service, preferences: Prefs("JP", "HK")); proxy.Start(false);
-        await proxy.CheckNowAsync();
+        await proxy.CheckRecoveryAsync();
         Assert.Equal(new[] { JapanFast, JapanSlow }, service.Selected); Assert.DoesNotContain(Hk, service.Tested);
     }
     [Fact] public async Task AllFailedRegionsAreRetriedInAFreshRound()
     {
         var service = Service(); service.Delays = []; var time = new ManualTime();
         await using var proxy = new ProxyMonitor(service, new(time), preferences: Prefs("HK", "JP", "SG")); proxy.Start(false);
-        await proxy.CheckNowAsync(); var tested = service.Tested.Count;
-        Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase); Assert.Equal(10, proxy.Status.NextCheck);
-        time.Now = 10; await proxy.CheckNowAsync(); Assert.Equal(tested * 2, service.Tested.Count); Assert.Equal(2, proxy.Status.Round);
+        await proxy.CheckRecoveryAsync(); var tested = service.Tested.Count;
+        Assert.Equal(ProxyPhase.Retrying, proxy.Status.Phase); Assert.Equal(2, proxy.Status.NextCheck);
+        time.Now = 10; await proxy.CheckRecoveryAsync(); Assert.Equal(tested * 2 + 1, service.Tested.Count); Assert.Equal(2, proxy.Status.Round);
     }
     [Fact] public async Task EmptySelectionAndMissingRegionsDoNotTestOtherRegions()
     {
         foreach (var preferences in new[] { Prefs(), Prefs("IS") })
         {
             var service = Service(); await using var proxy = new ProxyMonitor(service, preferences: preferences); proxy.Start(false);
-            await proxy.CheckNowAsync(); Assert.Empty(service.Tested); Assert.Empty(service.Selected); Assert.False(proxy.PermitsAgent);
+            await proxy.CheckRecoveryAsync(); Assert.Empty(service.Tested); Assert.Empty(service.Selected); Assert.False(proxy.PermitsAgent);
         }
     }
     [Fact] public async Task ReadOnlyRefreshWhileStoppedNeverProbesOrSelects()
@@ -129,16 +129,17 @@ public sealed class RegionTests
     [Fact] public async Task ApplyingPreferencesCancelsAndDrainsOldMeasurements()
     {
         var service = Service(); service.SlowTests = true;
-        await using var proxy = new ProxyMonitor(service); proxy.Start(false); var old = proxy.CheckNowAsync();
+        await using var proxy = new ProxyMonitor(service); proxy.Start(false); var old = proxy.CheckRecoveryAsync();
         await Eventually(() => Volatile.Read(ref service.ActiveTests) > 0);
         await proxy.ApplyPreferencesAsync(Prefs("HK")); await old; Assert.Equal(0, service.ActiveTests); Assert.Empty(service.Selected);
-        var previous = service.Tested.Count; service.SlowTests = false; service.HealthyNodes = [Hk]; await proxy.CheckNowAsync();
+        var previous = service.Tested.Count; service.SlowTests = false; service.HealthyNodes = [Hk]; await proxy.CheckRecoveryAsync();
         Assert.Equal(new[] { Hk }, service.Selected); Assert.All(service.Tested.Skip(previous), n => Assert.Equal("HK", RegionResolver.Resolve(n)?.Id));
     }
-    [Fact] public async Task ApplyingWhileHealthyKeepsCurrentNodeAndHealthGate()
+    [Fact] public async Task ApplyingWhileHealthyKeepsCurrentNodeAndRevalidatesConnection()
     {
-        var service = Service(); service.Healthy = true; await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync();
+        var service = Service(); service.Healthy = true; await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckRecoveryAsync();
         var epoch = proxy.HealthEpoch; await proxy.ApplyPreferencesAsync(Prefs("HK"));
+        Assert.False(proxy.PermitsAgent); await proxy.CheckNowAsync();
         Assert.True(proxy.PermitsAgent); Assert.Equal(epoch, proxy.HealthEpoch); Assert.Equal(JapanSlow, proxy.Status.Selected); Assert.Empty(service.Selected);
     }
     [Fact] public async Task ApplyingWakesAutomaticLoopAndDoesNotLeaveItCancelled()
@@ -182,7 +183,7 @@ public sealed class RegionTests
     }
     [Fact] public async Task SaveFailureLeavesActivePreferencesAndHealthySelectionUntouched()
     {
-        var service = Service(); service.Healthy = true; await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckNowAsync();
+        var service = Service(); service.Healthy = true; await using var proxy = new ProxyMonitor(service); proxy.Start(false); await proxy.CheckRecoveryAsync();
         var controller = new RegionSettingsController(new FailedStore(), proxy);
         await Assert.ThrowsAsync<IOException>(() => controller.ApplyAsync(Prefs("HK"), default));
         Assert.Equal(new[] { "JP" }, proxy.Preferences.PriorityRegionIds); Assert.True(proxy.PermitsAgent); Assert.Empty(service.Selected);

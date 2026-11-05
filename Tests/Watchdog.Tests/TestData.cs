@@ -98,13 +98,12 @@ internal sealed class FakeClash : IClashService
     public bool Healthy = true, FailSnapshot, SelectionError, SlowTests;
     public HashSet<string> HealthyNodes = [];
     public Dictionary<string, int> Delays = new() { [TestData.JapanFast] = 50, [TestData.JapanSlow] = 120, [TestData.OtherNode] = 1 };
-    public Dictionary<string, int>? Fallback;
     public ClashSnapshot? Mutation;
-    public ProxyProbeFailure ProbeFailure;
     public Func<string, CancellationToken, Task<ProxyProbe>>? Probe;
     public Func<string, string, CancellationToken, Task<int>>? Measure;
     public List<string> Selected = [], Tested = [], TestedUrls = [];
-    public int ActiveTests, MaximumConcurrent;
+    public int ActiveTests, MaximumConcurrent, Resets;
+    public Task ResetProbeConnectionsAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Resets++; return Task.CompletedTask; }
     public Task<ClashSnapshot> SnapshotAsync(CancellationToken ct)
     { lock (sync) return FailSnapshot ? throw new HerdrException("mock offline") : Task.FromResult(State); }
     public Task<ProxyProbe> ProbeProxyAsync(CancellationToken ct)
@@ -114,7 +113,7 @@ internal sealed class FakeClash : IClashService
             var selected = State.Selected ?? "";
             if (Probe is not null) return Probe(selected, ct);
             var healthy = Healthy || HealthyNodes.Contains(selected);
-            return Task.FromResult(new ProxyProbe(healthy, healthy ? 100 : null, healthy ? ProxyProbeFailure.None : ProbeFailure));
+            return Task.FromResult(new ProxyProbe(healthy, healthy ? 100 : null, healthy ? ProxyProbeFailure.None : ProxyProbeFailure.RequestFailed, ConnectionSeconds: healthy ? 60 : 0));
         }
     }
     public async Task<int> DelayAsync(string node, LocalEndpoint endpoint, string url, CancellationToken ct)
@@ -127,8 +126,7 @@ internal sealed class FakeClash : IClashService
             lock (sync)
             {
                 if (Mutation is not null) { State = Mutation; Mutation = null; }
-                var values = url == ProxyPolicy.TestUrls[1] ? Fallback ?? Delays : Delays;
-                return values.TryGetValue(node, out var value) ? value : throw new HerdrException("timeout");
+                return Delays.TryGetValue(node, out var value) ? value : throw new HerdrException("timeout");
             }
         }
         finally { lock (sync) ActiveTests--; }
@@ -143,5 +141,15 @@ internal sealed class FakeClash : IClashService
             if (SelectionError) throw new HerdrException("PUT timeout");
         }
         return Task.CompletedTask;
+    }
+}
+
+internal static class ProxyTestExtensions
+{
+    public static async Task CheckRecoveryAsync(this ProxyMonitor proxy)
+    {
+        await proxy.CheckNowAsync();
+        if (proxy.Status.Phase == ProxyPhase.Suspect && proxy.Status.ConsecutiveFailures == 1)
+            await proxy.CheckNowAsync();
     }
 }

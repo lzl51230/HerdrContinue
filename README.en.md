@@ -38,9 +38,13 @@ It first looks for a replacement in the current region, provided you've selected
 
 Within one region, **nodes from all selected subscriptions are tested at the same time**. The app tries the fastest node that passes testing and checks that it actually works as your proxy. If it doesn't, it tries the next node in that region before moving to another region. Nodes with the same name in different subscriptions are kept distinct, and the interface shows which subscription each node belongs to.
 
-Two rules are useful to know:
+Connectivity monitoring targets ChatGPT-authenticated Codex at `chatgpt.com/backend-api/codex/models` through the local proxy on port 7890. It reads no credentials and makes no model requests. The expected unauthenticated 401 response proves reachability, not account or model-session availability.
 
-- Two consecutive measurements above **800 ms** to the same test address count as a timeout. This also applies when checking your current node.
+Recovery follows these rules:
+
+- **Maintain the current node:** reuse one TCP/TLS connection with a heartbeat every 2 seconds. Recovery starts after two consecutive connections fail before lasting **60 seconds**. Reaching 60 seconds clears the failure count. The first failure pauses continuation and reconnects.
+- **Validate candidates:** measure each node once and rank only those at or below **800 ms**. After temporarily selecting a candidate, require an uninterrupted **10-second** connection before accepting it and resuming agents.
+- Connection establishment and silence are bounded at **10 seconds**. The interface shows connection age and failure counts. If all candidates fail, recovery retries after 2, 4, 8, 16, then 30 seconds, capped at 30 seconds.
 - **A working proxy stays selected.** The app doesn't keep switching just to chase a lower latency. If no subscriptions or no regions are selected, it only checks the connection and won't switch nodes automatically.
 
 The app combines nodes from your selected subscriptions for use together while keeping the original subscription files. To use just the subscription currently selected in Clash Party, click **Restore original configuration (恢复原配置)**; your region order is preserved. Stopping the service or quitting the app also leaves the current proxy configuration and node in place.
