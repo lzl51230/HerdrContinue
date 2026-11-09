@@ -7,6 +7,10 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
     private readonly TimeSpan interval = interval ?? ProxyPolicy.HeartbeatInterval;
     private readonly object sync = new();
     private readonly SemaphoreSlim checkGate = new(1, 1), preferencesGate = new(1, 1), wake = new(0, 1);
+    private readonly SemaphoreSlim configurationGate = new(1, 1);
+    private bool runRequested, automaticLoop = true, configuring, disposing;
+    private Task stopping = Task.CompletedTask;
+    private Task? disposal;
     private readonly CancellationTokenSource catalogueLifetime = new();
     private CancellationTokenSource configuration = new();
     private ProxyRegionPreferences preferences = preferences ?? ProxyRegionPreferences.Default;
@@ -54,63 +58,111 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
     {
         lock (sync)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            if (running || !recoveryEnabled) return;
-            running = true; generation++; Interlocked.Increment(ref epoch); round = 0;
-            consecutiveFailures = recoveryAttempt = 0; recoveryPending = false; failedNode = null;
-            while (wake.Wait(0)) { }
-            lifetime = new();
-            status = status with { Phase = ProxyPhase.Checking, HealthyAt = null, NextCheck = null, SwitchDeadline = null, Round = 0,
-                Delays = [], TestingRegionId = null, Completed = 0, RegionPriority = preferences.PriorityRegionIds,
-                ConnectionSeconds = 0, ConsecutiveFailures = 0, DisconnectReason = null, ValidatingCandidate = false };
-            Phase(generation, ProxyPhase.Checking, "正在经 127.0.0.1:7890 建立 Codex 长连接");
-            if (automatic)
-            {
-                var ct = lifetime.Token;
-                loop = Task.Run(async () =>
-                {
-                    try
-                    {
-                        while (!ct.IsCancellationRequested)
-                        {
-                            await CheckNowAsync(ct);
-                            using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                            var delay = clock.Delay(TimeSpan.FromSeconds(Math.Max(0.01,
-                                (Status.NextCheck ?? clock.Now + interval.TotalSeconds) - clock.Now)), waiting.Token);
-                            var changed = wake.WaitAsync(waiting.Token);
-                            await Task.WhenAny(delay, changed);
-                            waiting.Cancel();
-                            try { await Task.WhenAll(delay, changed); } catch (OperationCanceledException) when (waiting.IsCancellationRequested) { }
-                        }
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-                }, CancellationToken.None);
-            }
+            ObjectDisposedException.ThrowIf(disposed || disposing, this);
+            if (!recoveryEnabled) return;
+            runRequested = true;
+            automaticLoop = automatic;
+            StartRequested();
         }
     }
 
-    public async Task StopAsync()
+    // Called under sync. Configuration and draining must finish before a new loop starts.
+    private void StartRequested()
+    {
+        if (!runRequested || running || !recoveryEnabled || configuring || disposing || disposed || !stopping.IsCompletedSuccessfully) return;
+        running = true; generation++; Interlocked.Increment(ref epoch); round = 0;
+        consecutiveFailures = recoveryAttempt = 0; recoveryPending = false; failedNode = null;
+        while (wake.Wait(0)) { }
+        lifetime = new();
+        status = status with { Phase = ProxyPhase.Checking, HealthyAt = null, NextCheck = null, SwitchDeadline = null, Round = 0,
+            Delays = [], TestingRegionId = null, Completed = 0, RegionPriority = preferences.PriorityRegionIds,
+            ConnectionSeconds = 0, ConsecutiveFailures = 0, DisconnectReason = null, ValidatingCandidate = false };
+        Phase(generation, ProxyPhase.Checking, "正在经 127.0.0.1:7890 建立 Codex 长连接");
+        if (automaticLoop)
+        {
+            var ct = lifetime.Token;
+            loop = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!ct.IsCancellationRequested)
+                    {
+                        await CheckNowAsync(ct);
+                        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        var delay = clock.Delay(TimeSpan.FromSeconds(Math.Max(0.01,
+                            (Status.NextCheck ?? clock.Now + interval.TotalSeconds) - clock.Now)), waiting.Token);
+                        var changed = wake.WaitAsync(waiting.Token);
+                        await Task.WhenAny(delay, changed);
+                        waiting.Cancel();
+                        try { await Task.WhenAll(delay, changed); } catch (OperationCanceledException) when (waiting.IsCancellationRequested) { }
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            }, CancellationToken.None);
+        }
+    }
+
+    public Task StopAsync() => StopCore(clearIntent: true);
+
+    private Task StopCore(bool clearIntent)
     {
         Task? pending; CancellationTokenSource? source;
+        TaskCompletionSource completion;
         lock (sync)
         {
-            if (!running) return;
+            if (clearIntent) runRequested = false;
+            if (!running) return stopping;
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            stopping = completion.Task;
             running = false; generation++; Interlocked.Increment(ref epoch);
             source = lifetime; lifetime = null; pending = loop; loop = null;
             status = status with { Phase = ProxyPhase.Stopped, HealthyAt = null, NextCheck = null, SwitchDeadline = null,
                 TestingRegionId = null, ConnectionSeconds = 0, ValidatingCandidate = false, Detail = "代理监控已停止；保留当前节点" };
             StatusChanged?.Invoke(status);
         }
-        source?.Cancel();
-        if (pending is not null) await pending;
-        await checkGate.WaitAsync();
-        try { await service.ResetProbeConnectionsAsync(CancellationToken.None); probeContext = null; }
-        finally { checkGate.Release(); source?.Dispose(); }
+        _ = DrainStopAsync(pending, source, completion);
+        return completion.Task;
+    }
+
+    private async Task DrainStopAsync(Task? pending, CancellationTokenSource? source, TaskCompletionSource completion)
+    {
+        try
+        {
+            source?.Cancel();
+            if (pending is not null) await pending;
+            await checkGate.WaitAsync();
+            try { await service.ResetProbeConnectionsAsync(CancellationToken.None); probeContext = null; }
+            finally { checkGate.Release(); }
+            source?.Dispose();
+            lock (sync)
+            {
+                stopping = Task.CompletedTask;
+                StartRequested();
+                completion.SetResult();
+            }
+        }
+        catch (Exception e) { source?.Dispose(); completion.TrySetException(e); }
     }
 
     public async Task ConfigureAsync(ProxyRegionPreferences value, Func<Task> save, CancellationToken ct, bool restore = false)
     {
-        var wasRunning = Running;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, catalogueLifetime.Token);
+        ct = linked.Token;
+        await configurationGate.WaitAsync(ct);
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            await ConfigureCoreAsync(value, save, ct, restore);
+        }
+        finally
+        {
+            lock (sync) { configuring = false; StartRequested(); }
+            configurationGate.Release();
+        }
+    }
+
+    private async Task ConfigureCoreAsync(ProxyRegionPreferences value, Func<Task> save, CancellationToken ct, bool restore)
+    {
         var previous = Preferences;
         var sourcesChanged = previous.SelectedSourceIds is null ? value.SelectedSourceIds is not null :
             value.SelectedSourceIds is null || !previous.SelectedSourceIds.SequenceEqual(value.SelectedSourceIds);
@@ -120,12 +172,14 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             await ApplyPreferencesAsync(value, CancellationToken.None);
             return;
         }
-        if (wasRunning) await StopAsync();
+        lock (sync) configuring = true;
+        await StopCore(clearIntent: false);
         ClashSnapshot? before = null;
         try
         {
             if (restore) { before = await service.SnapshotAsync(ct); await service.RestoreSourcesAsync(ct); }
             else if (sourcesChanged) await service.PrepareSourcesAsync(value, ct);
+            ct.ThrowIfCancellationRequested();
             await save();
             await ApplyPreferencesAsync(value, CancellationToken.None);
         }
@@ -143,7 +197,6 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             catch (Exception rollback) { throw new IOException("设置未保存，运行配置回滚失败，请检查 Clash 当前状态", new AggregateException(failure, rollback)); }
             throw;
         }
-        finally { if (wasRunning) Start(); }
     }
 
     public async Task ApplyPreferencesAsync(ProxyRegionPreferences value, CancellationToken cancellationToken = default)
@@ -518,9 +571,20 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
     {
         lock (sync) { if (!running || generation != token || lastEvent == message) return; lastEvent = message; Event?.Invoke(message); }
     }
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        lock (sync)
+        {
+            disposing = true;
+            runRequested = false;
+            return new(disposal ??= DisposeCoreAsync());
+        }
+    }
+
+    private async Task DisposeCoreAsync()
     {
         catalogueLifetime.Cancel(); await StopAsync();
+        await configurationGate.WaitAsync();
         await preferencesGate.WaitAsync();
         try
         {
@@ -529,6 +593,7 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             checkGate.Release();
         }
         finally { preferencesGate.Release(); }
-        catalogueLifetime.Dispose(); checkGate.Dispose(); preferencesGate.Dispose(); wake.Dispose();
+        configurationGate.Release();
+        catalogueLifetime.Dispose(); checkGate.Dispose(); preferencesGate.Dispose(); configurationGate.Dispose(); wake.Dispose();
     }
 }
