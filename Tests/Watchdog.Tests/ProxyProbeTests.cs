@@ -102,7 +102,10 @@ public sealed class ProxyProbeTests
             var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("watchdog.invalid");
             request.CertificateExtensions.Add(san.Build());
             request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-            certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            // Schannel cannot use the ephemeral private key returned by CreateSelfSigned.
+            // A normal PKCS#12 import gives the test server a Windows-compatible key lifetime.
+            certificate = X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pkcs12), null);
             listener.Start(); Address = new($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
             Target = new($"{(tls ? "https" : "http")}://watchdog.invalid/test");
             accepting = AcceptAsync();
