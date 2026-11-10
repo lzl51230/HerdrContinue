@@ -136,8 +136,9 @@ internal sealed class FakeClash : IClashService
         ct.ThrowIfCancellationRequested();
         lock (sync)
         {
-            Selected.Add(node); State = TestData.Clash(node, State.Mode, State.Endpoint.Address,
-                State.Nodes["GLOBAL"].All!.Where(n => n is not "DIRECT" and not "自动选择").ToArray());
+            Selected.Add(node);
+            State = State with { Nodes = State.Nodes.ToDictionary(p => p.Key,
+                p => p.Key == "GLOBAL" ? p.Value with { Now = node } : p.Value) };
             if (SelectionError) throw new HerdrException("PUT timeout");
         }
         return Task.CompletedTask;

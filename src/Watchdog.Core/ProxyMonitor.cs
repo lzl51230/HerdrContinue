@@ -281,9 +281,20 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
             if (snapshot is not null) Apply(token, snapshot);
             else Update(token, s => s with { CatalogueError = error });
             // Monitoring must keep recovering on its own when switching is unavailable.
-            if (recoveryPending && (snapshot?.CanSelect != true ||
-                !snapshot.Candidates.Any(n => Preferences.Contains(n.Region?.Id) && Preferences.Allows(n, snapshot.CurrentSourceId))))
+            var canRecover = snapshot?.CanSelect == true &&
+                snapshot.Candidates.Any(n => Preferences.Contains(n.Region?.Id) && Preferences.Allows(n, snapshot.CurrentSourceId));
+            if (recoveryPending && !canRecover)
                 recoveryPending = false;
+            if (!recoveryPending && preparationError is null && canRecover && snapshot!.Selected == "DIRECT")
+            {
+                Phase(token, ProxyPhase.Checking, "检测到 GLOBAL 选择 DIRECT，开始恢复节点");
+                await ResetConnectionAsync(ct);
+                if (!Active(token)) return;
+                probeContext = snapshot;
+                recoveryPending = true; failedNode = snapshot.Selected; round = 0;
+                Update(token, s => s with { ConnectionSeconds = 0, ConsecutiveFailures = 0, DisconnectReason = null,
+                    ValidatingCandidate = false });
+            }
             if (!recoveryPending)
             {
                 var probe = await service.ProbeProxyAsync(ct);
@@ -409,10 +420,13 @@ public sealed class ProxyMonitor(IClashService service, MonotonicClock? clock = 
                         if (!Active(token)) return;
                         before = await CheckedSnapshotAsync(expected, token, ct);
                         if (before is null) return;
-                        var health = await service.ProbeProxyAsync(ct);
-                        if (!Active(token)) return;
-                        if (health.Healthy && health.ConnectionSeconds >= ProxyPolicy.MaintenanceSeconds)
-                        { consecutiveFailures = 0; Healthy(token, health); return; }
+                        if (before.Selected != "DIRECT")
+                        {
+                            var health = await service.ProbeProxyAsync(ct);
+                            if (!Active(token)) return;
+                            if (health.Healthy && health.ConnectionSeconds >= ProxyPolicy.MaintenanceSeconds)
+                            { consecutiveFailures = 0; Healthy(token, health); return; }
+                        }
                         before = await CheckedSnapshotAsync(expected, token, ct);
                         if (before is null) return;
                         await service.ResetProbeConnectionsAsync(ct);
