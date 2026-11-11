@@ -13,6 +13,7 @@ public sealed record ClashProfileCatalogue(string Directory, string CurrentId, s
 // Reads only client caches. Subscription downloads and scripts remain owned by Clash Party.
 public sealed class ClashProfileRepository(string? directory = null)
 {
+    internal const int MaximumConfigurationBytes = 32 * 1024 * 1024;
     internal static YamlMappingNode Parse(string yaml)
     {
         var stream = new YamlStream(); stream.Load(new StringReader(yaml));
@@ -25,7 +26,30 @@ public sealed class ClashProfileRepository(string? directory = null)
     internal static IEnumerable<YamlMappingNode> Items(YamlMappingNode node, string key) =>
         (Get(node, key) as YamlSequenceNode)?.Children.OfType<YamlMappingNode>() ?? [];
     internal static string Read(string path)
-    { if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new ClashProfileException("订阅配置过大"); return File.ReadAllText(path); }
+    {
+        using var input = File.OpenRead(path);
+        return Read(input, Path.GetFileName(path));
+    }
+    internal static string Read(Stream input, string fileName)
+    {
+        static ClashProfileException TooLarge(string name, long size, bool atLeast = false) =>
+            new($"配置文件 {name} 大小为{(atLeast ? "至少 " : " ")}{size} 字节，超过 32 MiB 上限");
+
+        if (input.Length > MaximumConfigurationBytes) throw TooLarge(fileName, input.Length);
+        using var bytes = new MemoryStream();
+        var buffer = new byte[64 * 1024];
+        // Read one extra byte to detect growth after the initial size check.
+        while (bytes.Length <= MaximumConfigurationBytes)
+        {
+            var count = input.Read(buffer, 0, (int)Math.Min(buffer.Length, MaximumConfigurationBytes + 1L - bytes.Length));
+            if (count == 0) break;
+            bytes.Write(buffer, 0, count);
+        }
+        if (bytes.Length > MaximumConfigurationBytes) throw TooLarge(fileName, bytes.Length, atLeast: true);
+        bytes.Position = 0;
+        using var reader = new StreamReader(bytes, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     public static string RuntimeName(string id, string name) => "HDAC-" + Hash(id)[..16] + " | " + name;
     private static IEnumerable<string> Directories()
