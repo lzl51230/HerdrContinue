@@ -10,6 +10,8 @@
     <ApplicationIcon>../../assets/AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <AvaloniaResource Include="Assets/Flags/*.png" />
+    <None Include="Assets/Flags/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="../../assets/AppIcon.ico" LogicalName="HerdrAutoContinue.AppIcon.ico" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />

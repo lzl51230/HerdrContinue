@@ -50,6 +50,13 @@ internal static class ThemeQaAutomation
                     CheckContrast();
                     var name = AppThemes.Id(choice.Theme);
                     Capture(window, Path.Combine(directory, name + "-main.png"));
+                    report["renderScaling"] = window.RenderScaling;
+                    var oldSize = window.ClientSize;
+                    window.Width = 900; window.Height = window.MinHeight;
+                    await Task.Delay(100);
+                    AssertVisible(window, "service-toggle"); AssertVisible(window, "app-exit");
+                    Capture(window, Path.Combine(directory, name + "-main-minimum.png"));
+                    window.Width = oldSize.Width; window.Height = oldSize.Height;
                     Capture(panel, Path.Combine(directory, name + "-settings.png"));
                     Find<ComboBox>(panel, "color-theme").IsDropDownOpen = true;
                     await Task.Delay(100);
@@ -69,14 +76,16 @@ internal static class ThemeQaAutomation
                     apply.IsEnabled = true;
                     panel.Width = 480; panel.Height = 350;
                     Find<ComboBox>(panel, "color-theme").Focus();
-                    await Task.Delay(100); Capture(panel, Path.Combine(directory, name + "-minimum.png"));
+                    await Task.Delay(100); AssertVisible(panel, "settings-apply"); AssertVisible(panel, "settings-cancel"); Capture(panel, Path.Combine(directory, name + "-minimum.png"));
                     Click(panel, "settings-apply"); await Wait(() => host.QaSettingsWindow is null);
                     Require(themes.Saved == choice.Theme && settings.Current.Settings.Theme == choice.Theme, "Theme did not persist");
                     Require(settings.Current.Registration == originalEntry, "Theme selection changed startup registration");
                     var regions = new RegionSettingsWindow(model); _ = regions.ShowDialog(window);
                     await Task.Delay(200); CheckWindow(regions); Capture(regions, Path.Combine(directory, name + "-regions.png")); regions.Close();
                     var delays = window.ShowDelays(); await Task.Delay(150);
-                    CheckWindow(delays); Capture(delays, Path.Combine(directory, name + "-delays.png")); delays.Close();
+                    CheckWindow(delays); Capture(delays, Path.Combine(directory, name + "-delays.png"));
+                    delays.Width = 420; delays.Height = 240; await Task.Delay(100);
+                    Capture(delays, Path.Combine(directory, name + "-delays-minimum.png")); delays.Close();
                 }
                 report["sixThemesAllWindows"] = true;
                 report["dropdownHoverDisabledFocusAndContrast"] = true;
@@ -112,6 +121,35 @@ internal static class ThemeQaAutomation
                 Click(preview, "settings-cancel"); await Wait(() => host.QaSettingsWindow is null);
                 report["saveFailureRestoresTheme"] = true;
                 report["serviceAndStartupUnchanged"] = model.QaSnapshot.Running && settings.Current.Registration == originalEntry;
+                await model.ToggleAsync();
+                model.QaPublishSnapshot(model.QaSnapshot with { Rows = Enumerable.Range(0, 12).Select(i =>
+                    new AgentRow("ui-" + i, "跨平台界面验收 · 很长的会话名称与项目路径 " + i,
+                        "/workspace/long-project-name", "Codex", "blocked",
+                        "等待人工确认；这是用于检查换行、列表滚动和列对齐的长状态说明。", null, i)).ToArray() });
+                await Task.Delay(100);
+                AssertVisible(window, "service-toggle"); AssertVisible(window, "app-exit");
+                Capture(window, Path.Combine(directory, "populated-agents.png"));
+                model.Delays.Clear();
+                for (var i = 0; i < 20; i++) model.Delays.Add("日本 · 很长的订阅来源名称 · 测试节点 " + i + "     120 ms");
+                var populatedDelays = window.ShowDelays(); populatedDelays.Width = 420; populatedDelays.Height = 240;
+                await Task.Delay(100); Capture(populatedDelays, Path.Combine(directory, "populated-delays-minimum.png"));
+                populatedDelays.Close(); report["populatedLayouts"] = true;
+                if (OperatingSystem.IsWindows())
+                {
+                    var screens = new List<object>();
+                    var position = window.Position;
+                    foreach (var screen in window.Screens.All)
+                    {
+                        window.Position = screen.WorkingArea.Position + new PixelPoint(24, 24);
+                        await Task.Delay(300);
+                        AssertVisible(window, "service-toggle"); AssertVisible(window, "app-exit");
+                        Require(window.ClientSize.Height * window.RenderScaling <= screen.WorkingArea.Height,
+                            "Window exceeds screen working area");
+                        screens.Add(new { screen.WorkingArea, window.RenderScaling, window.ClientSize });
+                        Capture(window, Path.Combine(directory, "screen-" + screens.Count + ".png"));
+                    }
+                    window.Position = position; report["screens"] = screens;
+                }
                 async Task SaveTheme(AppTheme theme)
                 {
                     var panel = await OpenSettings(host, window); Select(panel, theme);
@@ -163,6 +201,14 @@ internal static class ThemeQaAutomation
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static async Task Wait(Func<bool> condition)
     { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8)); while (!condition()) await Task.Delay(30, timeout.Token); }
+    private static void AssertVisible(Window window, string id)
+    {
+        var control = Find<Control>(window, id);
+        var origin = control.TranslatePoint(default, window);
+        Require(origin is { } p && p.X >= 0 && p.Y >= 0 &&
+            p.X + control.Bounds.Width <= window.ClientSize.Width + 1 &&
+            p.Y + control.Bounds.Height <= window.ClientSize.Height + 1, "Control outside window: " + id);
+    }
     private static void Capture(Window window, string path)
     {
         using var image = new RenderTargetBitmap(new PixelSize((int)window.ClientSize.Width, (int)window.ClientSize.Height));

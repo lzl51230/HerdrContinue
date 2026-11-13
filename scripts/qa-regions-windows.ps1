@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][string]$AppPath, [Parameter(Mandatory=$true)][string]$OutputDirectory, [string]$ReleaseAppPath)
+﻿param([Parameter(Mandatory=$true)][string]$AppPath, [Parameter(Mandatory=$true)][string]$OutputDirectory, [string]$ReleaseAppPath, [switch]$UiOnly)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Drawing
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
@@ -49,12 +49,12 @@ function Launch([string]$Path=$AppPath){
 }
 function Open-Settings($Process){
     Invoke-Control (Get-Window $Process) 'region-settings'
-    try{Wait-Until{(Get-Window $Process '地区设置') -ne $null}}catch{
+    try{Wait-Until{(Get-Window $Process '切换设置') -ne $null}}catch{
         $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$Process.Id)
         [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$condition)|ForEach-Object{$_.Current|Select-Object Name,AutomationId,NativeWindowHandle}|ConvertTo-Json|Set-Content (Join-Path $OutputDirectory 'window-diagnostic.json')
         throw
     }
-    return Get-Window $Process '地区设置'
+    return Get-Window $Process '切换设置'
 }
 function Close-App($Process){Invoke-Control (Get-Window $Process) 'app-exit';if(-not $Process.WaitForExit(8000)){throw 'App did not stop after explicit quit'};if($Process.ExitCode -ne 0){throw "Exit code: $($Process.ExitCode)"}}
 try{
@@ -71,16 +71,17 @@ try{
     $result.fourRegionsDiscovered=$true
     Set-Region $dialog 'HK' $true;Set-Region $dialog 'SG' $true;Invoke-Control $dialog 'region-up-HK'
     Wait-Until{-not (Find-Control $dialog 'region-up-HK').Current.IsEnabled}
-    Capture $dialog '01-region-draft.png';Invoke-Control $dialog 'region-cancel';Wait-Until{(Get-Window $app '地区设置') -eq $null}
+    Capture $dialog '01-region-draft.png';Invoke-Control $dialog 'region-cancel';Wait-Until{(Get-Window $app '切换设置') -eq $null}
     if(Test-Path (Join-Path $OutputDirectory 'settings.json')){throw 'Cancel persisted edits'}
     if((Find-Control $main 'region-order').Current.Name -ne '恢复优先级：日本'){throw 'Cancel changed active policy'}
     $result.cancelKeptOriginal=$true
     $dialog=Open-Settings $app;Set-Region $dialog 'HK' $true;Set-Region $dialog 'SG' $true;Invoke-Control $dialog 'region-up-HK'
     Wait-Until{-not (Find-Control $dialog 'region-up-HK').Current.IsEnabled};Invoke-Control $dialog 'region-apply'
-    Wait-Until{(Get-Window $app '地区设置') -eq $null}
+    Wait-Until{(Get-Window $app '切换设置') -eq $null}
     $settings=Get-Content (Join-Path $OutputDirectory 'settings.json') -Raw -Encoding UTF8|ConvertFrom-Json
     if(($settings.priorityRegionIds -join ',') -ne 'HK,JP,SG'){throw 'Unexpected saved order'}
     $result.savedOrder=$settings.priorityRegionIds
+    if(-not $UiOnly) {
     Invoke-Control $main 'service-toggle'
     Wait-Until{(Find-Control $main 'proxy-status').Current.Name -eq '代理正常'} 25
     if((Find-Control $main 'selected-proxy-node').Current.Name -notmatch '验收香港01'){throw 'Wrong region/node selected'}
@@ -90,6 +91,7 @@ try{
     if(@($trace.tested|Select-Object -Skip 4|Where-Object {$_ -notmatch '香港'}).Count){throw 'Retested failed region or skipped priority'}
     $result.currentRegionThenTopPriority=$true;$result.fastestHongKongNodeSelected=$true
     Capture $main '02-regions-recovered.png';Close-App $app
+    } else { $result.recoverySkippedForUiOnly=$true; Capture $main '02-regions-saved.png'; Close-App $app }
     $app=Launch;$main=Get-Window $app;$dialog=Open-Settings $app
     foreach($id in @('HK','JP','SG')){
         if((Find-Control $dialog ('region-check-'+$id)).GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne [Windows.Automation.ToggleState]::On){throw "Region checkbox was not restored: $id"}
@@ -97,7 +99,7 @@ try{
     if((Find-Control $dialog 'region-up-HK').Current.IsEnabled -or (Find-Control $dialog 'region-down-SG').Current.IsEnabled){throw 'Priority was not restored'}
     if((Find-Control $dialog 'region-check-US').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne [Windows.Automation.ToggleState]::Off){throw 'Unselected region became enabled'}
     $result.restartRestoredCheckboxesAndOrder=$true;Capture $dialog '03-regions-restored.png'
-    Invoke-Control $dialog 'region-cancel';Wait-Until{(Get-Window $app '地区设置') -eq $null};Close-App $app
+    Invoke-Control $dialog 'region-cancel';Wait-Until{(Get-Window $app '切换设置') -eq $null};Close-App $app
     if($ReleaseAppPath){
         $env:WATCHDOG_QA_SESSION=$null;$env:WATCHDOG_QA_SETTINGS_DIR=$null;$env:WATCHDOG_QA_REGIONS=$null
         $settingsPath=Join-Path $env:LOCALAPPDATA 'HerdrAutoContinue/settings.json'
@@ -107,7 +109,7 @@ try{
         Wait-Until{(Find-Control $dialog 'region-catalogue-summary').Current.Name -match '发现 [1-9][0-9]* 个地区'}
         $result.realCatalogue=(Find-Control $dialog 'region-catalogue-summary').Current.Name
         Capture $dialog '04-release-real-regions.png';Invoke-Control $dialog 'region-cancel'
-        Wait-Until{(Get-Window $app '地区设置') -eq $null};Close-App $app
+        Wait-Until{(Get-Window $app '切换设置') -eq $null};Close-App $app
         $after=if(Test-Path $settingsPath){(Get-FileHash $settingsPath -Algorithm SHA256).Hash}else{'missing'}
         if($before -ne $after){throw 'Read-only Release check modified user settings'}
         $result.portableReleaseAndReadOnlyCatalogue=$true

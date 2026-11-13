@@ -30,6 +30,7 @@ public sealed class AppSettingsWindow : Window
         originalAutoStart = DisplayedAutoStart();
         Title = "设置"; Width = 600; Height = 480; MinWidth = 480; MinHeight = 350;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        UiPresentation.FitToScreen(this);
         AutomationProperties.SetAutomationId(this, "app-settings-window");
         enabled = new CheckBox { Content = "登录后自动启动并运行续接服务", IsChecked = originalAutoStart };
         AutomationProperties.SetAutomationId(enabled, "startup-enabled");

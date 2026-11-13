@@ -30,6 +30,7 @@ public sealed class RegionSettingsWindow : Window
         AppThemeManager.Bind(error, TextBlock.ForegroundProperty, "AppError");
         Title = "切换设置"; Width = 680; Height = 620; MinWidth = 500; MinHeight = 400;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        UiPresentation.FitToScreen(this);
         AutomationProperties.SetAutomationId(this, "region-settings-window");
         var root = new Grid { Margin = new(20), RowDefinitions = new("Auto,Auto,Auto,*,Auto,Auto"), RowSpacing = 12 };
         root.Children.Add(new TextBlock { Text = "选择订阅源、恢复地区与优先级", FontSize = 21, FontWeight = FontWeight.SemiBold });
@@ -109,15 +110,16 @@ public sealed class RegionSettingsWindow : Window
             {
                 var region = availability.Region; var selected = draft.Selected.Contains(region.Id); var index = draft.Selected.ToList().IndexOf(region.Id);
                 var row = new Grid { ColumnDefinitions = new("*,80,45,45"), ColumnSpacing = 8, Margin = new(0, 3) };
-                var check = new CheckBox { Content = region.Flag + " " + region.Name, IsChecked = selected, IsEnabled = !saving };
+                var check = new CheckBox { Content = OperatingSystem.IsWindows() ? UiPresentation.RegionLabel(region) : region.Flag + " " + region.Name, IsChecked = selected, IsEnabled = !saving };
                 AutomationProperties.SetAutomationId(check, "region-check-" + region.Id);
+                AutomationProperties.SetName(check, region.Name);
                 check.IsCheckedChanged += (_, _) => { if (rebuilding) return; draft.SetSelected(region.Id, check.IsChecked == true); RebuildRows(); };
                 row.Children.Add(check);
                 var count = new TextBlock { Text = availability.NodeCount + " 个节点", VerticalAlignment = VerticalAlignment.Center };
                 AppThemeManager.Bind(count, TextBlock.ForegroundProperty, availability.NodeCount == 0 ? "AppWarning" : "AppSecondary");
                 Grid.SetColumn(count, 1); row.Children.Add(count);
-                var up = new Button { Content = "↑", IsEnabled = !saving && selected && index > 0, HorizontalContentAlignment = HorizontalAlignment.Center };
-                var down = new Button { Content = "↓", IsEnabled = !saving && selected && index < draft.Selected.Count - 1, HorizontalContentAlignment = HorizontalAlignment.Center };
+                var up = new Button { Content = OperatingSystem.IsWindows() ? UiPresentation.Icon("up", 14) : "↑", IsEnabled = !saving && selected && index > 0, HorizontalContentAlignment = HorizontalAlignment.Center };
+                var down = new Button { Content = OperatingSystem.IsWindows() ? UiPresentation.Icon("down", 14) : "↓", IsEnabled = !saving && selected && index < draft.Selected.Count - 1, HorizontalContentAlignment = HorizontalAlignment.Center };
                 AutomationProperties.SetAutomationId(up, "region-up-" + region.Id); AutomationProperties.SetAutomationId(down, "region-down-" + region.Id);
                 ToolTip.SetTip(up, "提高优先级"); ToolTip.SetTip(down, "降低优先级");
                 up.Click += (_, _) => { draft.Move(region.Id, -1); RebuildRows(); }; down.Click += (_, _) => { draft.Move(region.Id, 1); RebuildRows(); };

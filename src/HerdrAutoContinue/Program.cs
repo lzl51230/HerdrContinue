@@ -1,4 +1,6 @@
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Styling;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using Avalonia.Markup.Xaml.Styling;
@@ -58,6 +60,7 @@ internal static class Program
         finally { Instance = null; }
     }
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect()
+        .With(new Avalonia.Media.FontManagerOptions { DefaultFamilyName = OperatingSystem.IsWindows() ? "Microsoft YaHei UI" : null })
         .With(new MacOSPlatformOptions { ShowInDock = false }).LogToTrace();
 #if DEBUG
     private static void LoadQaBundleSettings()
@@ -84,6 +87,10 @@ public sealed class App : Application
     public override void Initialize()
     {
         Styles.Add(new FluentTheme());
+        if (OperatingSystem.IsWindows())
+            Styles.Add(new Avalonia.Styling.Style(x => x.OfType<Window>()) { Setters = {
+                new Setter(Avalonia.Controls.Primitives.TemplatedControl.FontFamilyProperty,
+                    new Avalonia.Media.FontFamily("Microsoft YaHei UI, Microsoft YaHei")) } });
         Styles.Add(new StyleInclude(new Uri("avares://HerdrAutoContinue/")) { Source = new Uri("avares://HerdrAutoContinue/ThemeStyles.axaml") });
     }
     public override void OnFrameworkInitializationCompleted()

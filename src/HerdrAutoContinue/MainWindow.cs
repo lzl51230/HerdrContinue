@@ -23,6 +23,7 @@ public sealed class MainWindow : Window
             if (icon is not null) Icon = new WindowIcon(icon);
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Enter, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control), Command = model.ToggleCommand });
         Content = BuildContent(openSettings);
+        UiPresentation.FitToScreen(this);
         Closing += (_, e) =>
         {
             if (isExiting()) return;
@@ -33,12 +34,18 @@ public sealed class MainWindow : Window
 
     private Control BuildContent(Func<Task> openSettings)
     {
-        var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,170,Auto") };
+        var root = new Grid { RowDefinitions = new("Auto,Auto,Auto,*,Auto,170"), MinHeight = 560 };
+        var shell = new Grid { RowDefinitions = new("Auto,*,Auto") };
         var heading = new Grid { ColumnDefinitions = new("64,*,Auto"), Margin = new(24, 20) };
-        heading.Children.Add(Text("↻", 47, color: Accent));
+        heading.Children.Add(OperatingSystem.IsWindows() ? UiPresentation.Icon("refresh", 32, Accent) : Text("↻", 47, color: Accent));
         Add(heading, new StackPanel { Spacing = 4, Children = { Text("Herdr 自动续接", 25, FontWeight.SemiBold), Bound(nameof(MainViewModel.FeatureSummary), 13, Secondary) } }, column: 1);
         var toggle = new Button { Width = 132, Height = 42, Classes = { "accent" }, HorizontalContentAlignment = HorizontalAlignment.Center };
         toggle.Bind(ContentControl.ContentProperty, new Binding(nameof(MainViewModel.ToggleText)));
+        if (OperatingSystem.IsWindows())
+            toggle.ContentTemplate = new FuncDataTemplate<string>((value, _) => new StackPanel {
+                Orientation = Orientation.Horizontal, Spacing = 7, Children = {
+                    UiPresentation.Icon(value?.StartsWith("■") == true ? "stop" : "play", 12, "AccentButtonForeground"),
+                    new TextBlock { Text = value?[1..].Trim(), VerticalAlignment = VerticalAlignment.Center } } });
         toggle.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(toggle, "service-toggle");
         toggle.Click += async (_, _) => await model.ToggleAsync();
@@ -46,12 +53,12 @@ public sealed class MainWindow : Window
         settings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(settings, "app-settings"); settings.Click += async (_, _) => await openSettings();
         Add(heading, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { settings, toggle } }, column: 2);
-        Add(root, heading);
+        Add(shell, heading);
 
         var summary = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
         var summaryText = Bound(nameof(MainViewModel.Summary), 13, Accent); AutomationProperties.SetAutomationId(summaryText, "service-state");
         summary.Children.Add(summaryText); Add(summary, Bound(nameof(MainViewModel.CooldownDescription), 13, Secondary), column: 1);
-        Add(root, ThemedBorder(new Border { Child = summary }, "AppSummary"), row: 1);
+        Add(root, ThemedBorder(new Border { Child = summary }, "AppSummary"), row: 0);
 
         var proxy = new Grid { RowDefinitions = new("Auto,Auto,Auto,Auto"), ColumnDefinitions = new("*,Auto"), RowSpacing = 7 };
         var proxyTitle = Bound(nameof(MainViewModel.ProxyTitle), 14, Accent); proxyTitle.FontWeight = FontWeight.SemiBold; AutomationProperties.SetAutomationId(proxyTitle, "proxy-status");
@@ -70,14 +77,14 @@ public sealed class MainWindow : Window
         regionSettings.Bind(IsEnabledProperty, new Binding(nameof(MainViewModel.CanToggle)));
         AutomationProperties.SetAutomationId(regionSettings, "region-settings");
         regionSettings.Click += async (_, _) => await new RegionSettingsWindow(model).ShowDialog(this); Add(proxy, regionSettings, row: 3, column: 1);
-        Add(root, ThemedBorder(new Border { Margin = new(24, 16, 24, 0), Padding = new(14), CornerRadius = new(10), BorderThickness = new(1), Child = proxy }, "AppPanel"), row: 2);
+        Add(root, ThemedBorder(new Border { Margin = new(24, 16, 24, 0), Padding = new(14), CornerRadius = new(10), BorderThickness = new(1), Child = proxy }, "AppPanel"), row: 1);
 
         var connection = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 12) };
         var status = Bound(nameof(MainViewModel.Connection), 12, Secondary); AutomationProperties.SetAutomationId(status, "connection-status");
-        connection.Children.Add(status); Add(connection, Bound(nameof(MainViewModel.UpdatedAt), 12, Secondary), column: 1); Add(root, connection, row: 3);
+        connection.Children.Add(status); Add(connection, Bound(nameof(MainViewModel.UpdatedAt), 12, Secondary), column: 1); Add(root, connection, row: 2);
 
         var agentsArea = new Grid { RowDefinitions = new("Auto,*"), Margin = new(24, 0) };
-        var columns = new Grid { ColumnDefinitions = new("2.2*,80,2.5*,50"), Margin = new(12, 8) };
+        var columns = new Grid { ColumnDefinitions = new("2.2*,80,2.5*,50"), ColumnSpacing = 8, Margin = new(12, 8) };
         foreach (var (label, index) in new[] { ("Agent", 0), ("状态", 1), ("监控结果", 2), ("续接", 3) }) Add(columns, Text(label, 12, FontWeight.SemiBold, Secondary), column: index);
         agentsArea.Children.Add(columns);
         var list = new ItemsControl { ItemsSource = model.Rows, ItemTemplate = new FuncDataTemplate<AgentRowViewModel>((_, _) => AgentView()) };
@@ -86,13 +93,13 @@ public sealed class MainWindow : Window
         var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Spacing = 10 };
         empty.Children.Add(Bound(nameof(MainViewModel.EmptyTitle), 22, Secondary)); empty.Children.Add(Bound(nameof(MainViewModel.EmptyDescription), 13, Secondary));
         empty.Bind(IsVisibleProperty, new Binding(nameof(MainViewModel.HasNoRows))); Add(agentsArea, empty, row: 1);
-        Add(root, agentsArea, row: 4);
+        Add(root, agentsArea, row: 3);
 
         var logHeading = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(24, 10) };
         logHeading.Children.Add(Text("操作日志", 13, FontWeight.SemiBold));
         var openLog = new Button { Content = "打开日志文件", FontSize = 12, Padding = new(8, 4) }; openLog.Click += (_, _) => model.RevealLog();
         AutomationProperties.SetAutomationId(openLog, "open-log"); Add(logHeading, openLog, column: 1);
-        Add(root, ThemedBorder(new Border { BorderThickness = new(0, 1, 0, 0), Child = logHeading }), row: 5);
+        Add(root, ThemedBorder(new Border { BorderThickness = new(0, 1, 0, 0), Child = logHeading }), row: 4);
         var events = new ItemsControl { ItemsSource = model.Events, ItemTemplate = new FuncDataTemplate<Watchdog.Core.MonitorEvent>((value, _) =>
         {
             var row = new Grid { ColumnDefinitions = new("70,145,*"), Margin = new(0, 3) };
@@ -101,14 +108,20 @@ public sealed class MainWindow : Window
             var message = Text(value?.Message ?? "", 11); message.TextWrapping = TextWrapping.Wrap; Add(row, message, column: 2); return row;
         }) };
         AutomationProperties.SetAutomationId(events, "operation-log");
-        Add(root, new ScrollViewer { Content = events, Margin = new(24, 0), HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, row: 6);
+        Add(root, new ScrollViewer { Content = events, Margin = new(24, 0), HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, row: 5);
         var footer = new Grid { Margin = new(24, 12), ColumnDefinitions = new("*,Auto"), ColumnSpacing = 10 };
-        var help = Text("ⓘ  关闭窗口隐藏到托盘。正常完成、人工中断和等待确认的对话不会自动续接。", 12, color: Secondary);
-        help.TextWrapping = TextWrapping.Wrap; footer.Children.Add(help);
+        var help = Text("关闭窗口隐藏到托盘。正常完成、人工中断和等待确认的对话不会自动续接。", 12, color: Secondary);
+        help.TextWrapping = TextWrapping.Wrap;
+        var footerHelp = new Grid { ColumnDefinitions = new("18,*"), ColumnSpacing = 4 };
+        footerHelp.Children.Add(UiPresentation.Icon("info", 14, Secondary)); Add(footerHelp, help, column: 1);
+        footer.Children.Add(footerHelp);
         var exit = new Button { Content = "退出应用", FontSize = 12, Padding = new(8, 4) };
         AutomationProperties.SetAutomationId(exit, "app-exit"); exit.Click += async (_, _) => await ExitAsync();
-        Grid.SetColumn(exit, 1); footer.Children.Add(exit); Add(root, footer, row: 7);
-        return root;
+        Grid.SetColumn(exit, 1); footer.Children.Add(exit); Add(shell, footer, row: 2);
+        var bodyScroll = new ScrollViewer { Content = root, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        bodyScroll.SizeChanged += (_, e) => root.Height = Math.Max(560, e.NewSize.Height);
+        Add(shell, bodyScroll, row: 1);
+        return shell;
     }
 
     private static Control AgentView()
@@ -127,9 +140,15 @@ public sealed class MainWindow : Window
     }
     internal Window ShowDelays()
     {
-        var window = new Window { Title = model.DelayTitle, Width = 530, Height = 330, MinWidth = 420, MinHeight = 240,
-            Content = new StackPanel { Margin = new(20), Spacing = 12, Children = { Text(model.DelayTitle, 18, FontWeight.SemiBold),
-                new ScrollViewer { MaxHeight = 210, Content = new ItemsControl { ItemsSource = model.Delays } }, Text("同地区并行测速，≤800 ms 入选；切换后须保持 10 秒长连接。", 12, color: Secondary) } } };
+        var content = new Grid { Margin = new(20), RowDefinitions = new("Auto,*,Auto"), RowSpacing = 12 };
+        content.Children.Add(Text(model.DelayTitle, 18, FontWeight.SemiBold));
+        Add(content, new ScrollViewer { Content = new ItemsControl { ItemsSource = model.Delays },
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }, row: 1);
+        var help = Text("同地区并行测速，≤800 ms 入选；切换后须保持 10 秒长连接。", 12, color: Secondary);
+        help.TextWrapping = TextWrapping.Wrap;
+        Add(content, help, row: 2);
+        var window = new Window { Title = model.DelayTitle, Width = 530, Height = 330, MinWidth = 420, MinHeight = 240, Content = content };
+        UiPresentation.FitToScreen(window);
         window.ShowDialog(this);
         return window;
     }
