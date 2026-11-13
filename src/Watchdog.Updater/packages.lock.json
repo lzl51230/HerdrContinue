@@ -19,7 +19,7 @@
       "watchdog.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Watchdog.Core": "[1.6.1, )",
+          "Watchdog.Core": "[1.7.0, )",
           "YamlDotNet": "[16.3.0, )"
         }
       }
