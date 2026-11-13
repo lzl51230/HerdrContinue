@@ -209,3 +209,17 @@ GitHub Actions 在 macOS 与 Windows 上执行锁定还原、构建、测试和�
 通用设置新增 `proxyRecoveryEnabled` 和 `agentRecoveryEnabled`，默认均为 true，旧配置缺失字段时保持开启，非法字段分别回退并提示。设置保存后异步应用，等待旧的待发送任务或代理任务退出。已发出的请求继续记录结果。
 
 代理关闭时停止自动探测、测速及切换，启动仅加载本地地区偏好；agent 续接不再依赖代理健康检查。手动地区设置操作仍可按需读取 Clash。agent 关闭时继续监测状态，行内标记自动续接关闭，不提交续接；两者都关闭时服务保持只读监测。全局启停优先于功能开关。重新开启保留去重与上次介入时间。代理监控自身也拒绝在功能关闭时启动，避免其他配置流程重新拉起。
+
+## 应用更新实现与验证
+
+更新请求使用独立 HTTP 客户端，显式固定 HTTP 代理 `127.0.0.1:7890`，清空绕过列表并禁止自动重定向；每次 HTTPS 重定向仍由同一客户端请求。SHA-256 来源为 GitHub asset digest 或同一 Release 的 SHA256SUMS.txt。
+
+发布包包含自包含 Watchdog.Updater 和 update-manifest.json；版本取自 Directory.Build.props。macOS 解包及复制使用 ditto 保留 .NET 文件代码签名所需的扩展属性。不要使用普通逐文件复制替代。Windows 清单用于清除旧版包文件，额外用户文件予以保留。
+
+辅助程序在安装目录之外运行；普通权限协调进程负责重启，必要时提权的 worker 负责文件操作。事务和步骤标记保存在用户设置目录的 Updates 下，旧版备份位于安装路径加 `.update-backup`。发生系统断电或辅助进程异常退出时，应保留事务与备份进行恢复，不能删除唯一可用副本。
+
+测试：`dotnet test HerdrContinue.slnx -c Release`；安装替换和回滚：`python3 scripts/qa-update-worker.py --app <正式包解压路径> --output <报告目录>`。测试在临时副本中运行，不替换正式安装。
+
+完整按钮到重启测试使用 `scripts/qa-update-e2e.py --prepare --base-app <发布包解压目录> --output <全新测试目录>` 构建隔离 1.6.1/1.6.2，再用 `--case success-stopped`、`success-running`、`corrupt`、`startup-failure` 运行各场景。Windows 可用 `scripts/qa-update-e2e-windows.ps1 -Prepare` 在普通用户交互桌面执行。`--target` 只用于预先准备的受保护测试安装副本，系统授权仍由用户操作；不要指向正式应用。
+
+恢复扫描不得干预启动当前进程的更新事务，协调器需要先消费健康确认。macOS 提权环境下系统命令使用原生 spawn/waitpid 和有界超时，避免托管退出通知停滞。具体证据见 [更新验收记录](validation-updates-2026-11-13.md)。

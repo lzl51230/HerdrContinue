@@ -14,7 +14,7 @@ public sealed class MainWindow : Window
     private const string Accent = "AppAccent", Secondary = "AppSecondary";
     private readonly MainViewModel model;
     private readonly Func<Task> quit;
-    public MainWindow(MainViewModel model, Func<bool> isExiting, Func<Task> openSettings, Func<Task> quit)
+    public MainWindow(MainViewModel model, Func<bool> isExiting, Func<Task> openSettings, Func<Task> quit, Watchdog.Infrastructure.AppUpdates? updates = null, Func<Task>? install = null)
     {
         this.quit = quit;
         this.model = model; DataContext = model;
@@ -22,7 +22,14 @@ public sealed class MainWindow : Window
         using (var icon = typeof(MainWindow).Assembly.GetManifestResourceStream("HerdrAutoContinue.AppIcon.ico"))
             if (icon is not null) Icon = new WindowIcon(icon);
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Enter, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control), Command = model.ToggleCommand });
-        Content = BuildContent(openSettings);
+        var body = BuildContent(openSettings);
+        if (updates is not null && install is not null)
+        {
+            var layout = new DockPanel();
+            var panel = new UpdatePanel(updates, install, true) { Margin = new(24, 8) };
+            DockPanel.SetDock(panel, Dock.Top); layout.Children.Add(panel); layout.Children.Add(body); Content = layout;
+        }
+        else Content = body;
         UiPresentation.FitToScreen(this);
         Closing += (_, e) =>
         {

@@ -24,7 +24,7 @@ public sealed class AppSettingsWindow : Window
     private bool refreshing;
     private bool saving;
     private Task pending = Task.CompletedTask;
-    public AppSettingsWindow(AppSettingsController controller, AppThemeManager themes, Func<AppSettings, Task>? onSaved = null)
+    public AppSettingsWindow(AppSettingsController controller, AppThemeManager themes, Func<AppSettings, Task>? onSaved = null, AppUpdates? updates = null, Func<Task>? install = null)
     {
         this.controller = controller; this.themes = themes; this.onSaved = onSaved;
         originalAutoStart = DisplayedAutoStart();
@@ -79,6 +79,7 @@ public sealed class AppSettingsWindow : Window
             new TextBlock { Text = "颜色主题", FontWeight = FontWeight.SemiBold }, theme, previewHelp,
             new Border { Height = 1, Margin = new(0, 4) }, proxyRecovery, agentRecovery, featureHelp, new TextBlock { Text = "介入冷却时长（秒）", FontWeight = FontWeight.SemiBold }, cooldown, cooldownHelp, enabled, help, startupStatus, systemSettings, silent, silentHelp, message } };
         AppThemeManager.Bind((Border)fields.Children[3], Border.BackgroundProperty, "AppBorder");
+        if (updates is not null && install is not null) fields.Children.Add(new UpdatePanel(updates, install));
         var scroll = new ScrollViewer { Content = fields, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 10, Children = { cancel, apply } };

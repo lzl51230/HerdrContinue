@@ -20,6 +20,12 @@ public sealed class DesktopApplicationController
     private bool themeReady, showWhenReady;
     private readonly CancellationTokenSource lifetime = new();
     private readonly TrayIcon tray;
+    private readonly AppUpdates updates = new(
+#if DEBUG
+        (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") ?? "").StartsWith("updates", StringComparison.Ordinal) ? new UpdateQaAutomation.ReleaseHandler() : null
+#endif
+    );
+    private Task updateLoop = Task.CompletedTask;
     private readonly NativeMenuItem toggle, status;
     private MainWindow? window;
     private AppSettingsWindow? settingsWindow;
@@ -41,10 +47,11 @@ public sealed class DesktopApplicationController
         var show = new NativeMenuItem("打开主窗口"); show.Click += (_, _) => ShowMainWindow();
         var preferences = new NativeMenuItem("设置"); preferences.Click += async (_, _) => await ShowSettingsAsync();
         toggle = new NativeMenuItem("启动服务"); toggle.Click += async (_, _) => { if (!IsExiting) await model.ToggleAsync(); };
+        var checkUpdates = new NativeMenuItem("检查更新"); checkUpdates.Click += async (_, _) => { await ShowSettingsAsyncForUpdates(); };
         var quit = new NativeMenuItem("退出"); quit.Click += async (_, _) => await QuitAsync();
         status = new NativeMenuItem("正在初始化…") { IsEnabled = false };
         using var icon = typeof(MainWindow).Assembly.GetManifestResourceStream("HerdrAutoContinue.AppIcon.ico")!;
-        tray = new TrayIcon { Icon = new WindowIcon(icon), ToolTipText = "Herdr 自动续接", Menu = new NativeMenu { Items = { status, new NativeMenuItemSeparator(), show, preferences, toggle, new NativeMenuItemSeparator(), quit } } };
+        tray = new TrayIcon { Icon = new WindowIcon(icon), ToolTipText = "Herdr 自动续接", Menu = new NativeMenu { Items = { status, new NativeMenuItemSeparator(), show, preferences, checkUpdates, toggle, new NativeMenuItemSeparator(), quit } } };
         tray.Clicked += (_, _) => ShowMainWindow();
         TrayIcon.SetIcons(app, new TrayIcons { tray });
         model.PropertyChanged += ModelChanged;
@@ -56,11 +63,18 @@ public sealed class DesktopApplicationController
     public void Start()
     {
         startup = StartCoreAsync();
+        _ = RecoverUpdateAsync();
 #if DEBUG
         if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SESSION") is not null &&
             Environment.GetEnvironmentVariable("WATCHDOG_QA_AUTOMATION_DIR") is { } directory)
             _ = RunQaAsync(directory);
 #endif
+    }
+    private async Task RecoverUpdateAsync()
+    {
+        await startup;
+        if (!IsExiting) await updates.RecoverPendingAsync(() => model.Running, QuitAsync);
+        if (!IsExiting) updateLoop = updates.RunAsync(lifetime.Token);
     }
     private async Task StartCoreAsync()
     {
@@ -69,14 +83,17 @@ public sealed class DesktopApplicationController
             options = await MacLaunchContext.ResolveAsync(options, lifetime.Token);
             var loaded = await settings.InitializeAsync(lifetime.Token);
             await model.ApplyAppSettingsAsync(loaded.Settings);
-            showWhenReady |= options.ShouldShowMainWindow(loaded.Settings);
+            var restart = UpdateInstaller.RestartContext(out var transaction);
+            showWhenReady |= restart is not null || options.ShouldShowMainWindow(loaded.Settings);
             themes.Commit(loaded.Settings.Theme);
             themeReady = true;
             if (showWhenReady) ShowMainWindow();
+            if (restart is not null && transaction is not null)
+            { File.WriteAllText(transaction + ".healthy", ""); updates.ReportRestart(File.Exists(transaction + ".phase") && File.ReadAllText(transaction + ".phase") == "rolled-back"); }
             await model.InitializeAsync();
             if (loaded.Warning is { } warning) Report(warning);
             if (IsExiting) return;
-            if (options.ShouldStartService(loaded.Settings)) await model.StartServiceAsync();
+            if (restart?.Running ?? options.ShouldStartService(loaded.Settings)) await model.StartServiceAsync();
             else if (loaded.Settings.ProxyRecoveryEnabled) await model.RefreshRegionsAsync(lifetime.Token);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -103,7 +120,7 @@ public sealed class DesktopApplicationController
         if (!themeReady) { showWhenReady = true; return; }
         if (window is null)
         {
-            window = new(model, () => IsExiting, ShowSettingsAsync, QuitAsync);
+            window = new(model, () => IsExiting, ShowSettingsAsync, QuitAsync, updates, InstallUpdateAsync);
             desktop.MainWindow = window;
         }
         app.TryGetFeature<IActivatableLifetime>()?.TryLeaveBackground();
@@ -124,13 +141,18 @@ public sealed class DesktopApplicationController
             await settings.InitializeAsync(lifetime.Token);
             if (IsExiting) return;
             themes.Commit(settings.Current.Settings.Theme);
-            settingsWindow = new(settings, themes, model.ApplyAppSettingsAsync);
+            settingsWindow = new(settings, themes, model.ApplyAppSettingsAsync, updates, InstallUpdateAsync);
             await settingsWindow.ShowDialog(window!);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception e) { Report("无法打开设置：" + e.Message); }
         finally { settingsWindow = null; openingSettings = false; }
     }
+    private async Task ShowSettingsAsyncForUpdates()
+    {
+        var showing = ShowSettingsAsync(); await updates.CheckAsync(lifetime.Token); await showing;
+    }
+    private Task InstallUpdateAsync() => updates.InstallAsync(() => model.Running, QuitAsync);
     public Task QuitAsync() => exiting ??= QuitCoreAsync();
     private bool RequestShutdown()
     {
@@ -147,6 +169,7 @@ public sealed class DesktopApplicationController
         if (settingsWindow is not null) await settingsWindow.WaitForSaveAsync();
         await stopping;
         await startup;
+        await updateLoop;
         model.PropertyChanged -= ModelChanged;
         tray.Dispose(); themes.Dispose(); lifetime.Dispose();
         MacLaunchContext.Restore();
@@ -159,7 +182,11 @@ public sealed class DesktopApplicationController
     private async Task RunQaAsync(string directory)
     {
         await startup;
-        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("features", StringComparison.Ordinal) == true)
+        if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") == "updates-e2e")
+            await UpdateQaAutomation.RunEndToEndAsync(this, model, updates, directory);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") == "updates")
+            await UpdateQaAutomation.RunAsync(this, updates, directory);
+        else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("features", StringComparison.Ordinal) == true)
             await FeatureQaAutomation.RunAsync(this, model, settings, directory);
         else if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO")?.StartsWith("cooldown", StringComparison.Ordinal) == true)
             await CooldownQaAutomation.RunAsync(this, model, settings, directory);

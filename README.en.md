@@ -93,3 +93,9 @@ For build instructions, troubleshooting, and detailed behavior, see the [develop
 The intervention cooldown defaults to 5 seconds and can be changed to 1–300 seconds in Settings, taking effect when saved. The first intervention is immediate; later interventions wait only for the time remaining since the previous attempt. Each agent has an independent timer, separate from the timer between proxy node switches.
 
 Settings includes two independent switches, both enabled by default: **Clash proxy recovery** and **Herdr agent continuation**. Changes take effect when saved. Disabling proxy recovery stops automatic probes, measurements, and node switching; agents can continue without Clash. Disabling agent continuation keeps status monitoring but sends no continuation prompts. With both off, the service only monitors agents. Stopping the service stops all background monitoring.
+
+## Application updates
+
+The app checks stable GitHub Releases at startup and every six hours. Settings and the tray offer a manual check; a new version adds an Update and restart button to the main window and Settings. Downloads are verified before installation. Restart preserves whether the service was running or stopped.
+
+All update requests, checksums, downloads and redirects must use the HTTP proxy at `127.0.0.1:7890`; there is no direct fallback. Downloads can be cancelled. Protected installation folders request system administrator authorization. Install a build containing the updater manually once to enable subsequent in-app updates.

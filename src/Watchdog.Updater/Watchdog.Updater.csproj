@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><PublishSingleFile>true</PublishSingleFile><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Watchdog.Infrastructure/Watchdog.Infrastructure.csproj" /></ItemGroup>
+</Project>

@@ -5,4 +5,5 @@
   <Project Path="src/Watchdog.Probe/Watchdog.Probe.csproj" />
   <Project Path="Tests/Watchdog.Tests/Watchdog.Tests.csproj" />
   <Project Path="Tests/Watchdog.FakeAgent/Watchdog.FakeAgent.csproj" />
+  <Project Path="src/Watchdog.Updater/Watchdog.Updater.csproj" />
 </Solution>

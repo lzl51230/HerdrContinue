@@ -21,6 +21,9 @@ internal static class Program
 #if DEBUG
             if (args.Contains("--qa-memory")) return MemoryQaApplication.Run(args);
             LoadQaBundleSettings();
+            if (Environment.GetEnvironmentVariable("WATCHDOG_QA_SCENARIO") == "updates-e2e" &&
+                Environment.GetEnvironmentVariable("WATCHDOG_QA_UPDATE_BEHAVIOR") == "startup-failure" &&
+                AppUpdates.CurrentVersion == "1.6.2") return 23;
             for (var i = 0; i + 1 < args.Length; i++)
             {
                 if (args[i] == "--qa-session") Environment.SetEnvironmentVariable("WATCHDOG_QA_SESSION", args[++i]);
