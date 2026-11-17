@@ -6,15 +6,16 @@ public sealed class RecoveryTests
 {
     private static void Send(RecoveryMachine m, Observation o, double now)
     { var intent = m.Evaluate(o, now).Intent; Assert.NotNull(intent); Assert.True(m.Claim(intent, o, now)); m.SubmissionConfirmed(o.Key); }
-    [Fact] public void FirstFailureIsImmediateAndOldEvidenceNeverResends()
-    { var m = new RecoveryMachine(); Send(m, Observe(), 100); Assert.Null(m.Evaluate(Observe(), 1000).Intent); }
-    [Theory] [InlineData(5)] [InlineData(10)]
-    public void SubsequentFailureWaitsOnlyRemainingTime(int seconds)
+    [Theory] [InlineData(Capacity)] [InlineData(BadRequest)]
+    public void FirstFailureIsImmediateAndOldEvidenceNeverResends(string error)
+    { var m = new RecoveryMachine(); var o = Observe(Screen(error)); Send(m, o, 100); Assert.Null(m.Evaluate(o, 1000).Intent); }
+    [Theory] [InlineData(5, Capacity)] [InlineData(10, Capacity)] [InlineData(5, BadRequest)] [InlineData(10, BadRequest)]
+    public void SubsequentFailureWaitsOnlyRemainingTime(int seconds, string error)
     {
-        var m = new RecoveryMachine(); m.SetCooldownSeconds(seconds); Send(m, Observe(), 100);
-        var next = Observe(sequence: 3); Assert.Equal(100 + seconds, m.Evaluate(next, 102).Row.Deadline);
+        var m = new RecoveryMachine(); m.SetCooldownSeconds(seconds); Send(m, Observe(Screen(error)), 100);
+        var next = Observe(Screen(error), sequence: 3); Assert.Equal(100 + seconds, m.Evaluate(next, 102).Row.Deadline);
         Assert.Null(m.Evaluate(next, 100 + seconds - .001).Intent); Send(m, next, 100 + seconds);
-        Send(m, Observe(sequence: 5), 200);
+        Send(m, Observe(Screen(error), sequence: 5), 200);
     }
     [Fact] public void AgentsAndNewOccupantsAreIndependent()
     { var m = new RecoveryMachine(); Send(m, Observe(terminal: "a"), 0); Send(m, Observe(terminal: "b"), 1); Send(m, Observe(terminal: "a", pid: 101), 2); }

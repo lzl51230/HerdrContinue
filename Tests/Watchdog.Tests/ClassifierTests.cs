@@ -15,27 +15,55 @@ public sealed class ClassifierTests
         foreach (var error in new[] { "stream disconnected before completion: error sending request", "Request timed out", "Connection reset by peer", "fetch failed", "网络连接失败", "unexpected status 502 Bad Gateway", "504 Gateway Timeout", "Connection timed out" })
             Assert.Equal(FailureReason.Network, classifier.Assess(Observe(Screen(error))).Evidence!.Reason);
     }
+    [Theory]
+    [InlineData(BadRequest)]
+    [InlineData("{ \"detail\" : \"Bad Request\" }")]
+    [InlineData("Bad Request")]
+    [InlineData("unexpected status 400 Bad Request")]
+    [InlineData("bAd ReQuEsT")]
+    [InlineData("\u001b[31mBad Request\u001b[0m")]
+    [InlineData("{\n  \"detail\": \"Bad Request\"\n  }")]
+    [InlineData("unexpected status 400\n  Bad Request")]
+    public void BadRequestMessages(string error) =>
+        Assert.Equal(FailureReason.Network, classifier.Assess(Observe(Screen(error))).Evidence!.Reason);
+
+    [Theory]
+    [InlineData("400")]
+    [InlineData("HTTP 400")]
+    [InlineData("{\"detail\":\"Invalid request\"}")]
+    public void OtherRequestErrorsAreNotIncluded(string error) => Skips(Observe(Screen(error)));
+
     [Fact] public void ExcludedFailures()
     {
-        foreach (var error in new[] { "Conversation interrupted - use /feedback if something went wrong", "Context window exceeded", "Usage limit reached", "insufficient_quota: network error", "rate limit exceeded", "Authentication failed: connection error", "Request canceled", "certificate verify failed: network error" }) Skips(Observe(Screen(error)));
+        foreach (var error in new[] { "Conversation interrupted - use /feedback if something went wrong", "Context window exceeded", "Usage limit reached", "insufficient_quota: network error", "rate limit exceeded", "Authentication failed: connection error", "Request canceled", "certificate verify failed: network error" })
+        {
+            Skips(Observe(Screen(error)));
+            Skips(Observe(Screen("Bad Request: " + error)));
+        }
     }
     [Fact] public void NonReadyStatesNeverPrompt() { foreach (var state in new[] { "working", "blocked", "unknown" }) Skips(Observe(status: state)); }
-    [Fact] public void NormalCompletionAndHistoricalError() => Skips(Observe($"■ {Capacity}\n› 继续\n• Completed successfully.\n› Ask Codex to do anything\n  GPT-6 high\n"));
-    [Fact] public void LatestErrorWins() => Skips(Observe($"■ {Capacity}\n› 继续\n■ Conversation interrupted\n› Ask Codex to do anything\n"));
-    [Fact] public void ToolOutputAndQuotedErrorAreIgnored()
-    { foreach (var prefix in new[] { "  ■ ", "│ ■ ", "> ■ ", "  └ ■ " }) Skips(Observe(prefix + Capacity + "\n› Ask Codex to do anything\n")); }
-    [Fact] public void DraftIsNotOverwritten() => Skips(Observe(Screen(prompt: "My unfinished request")));
+    [Theory] [InlineData(Capacity)] [InlineData(BadRequest)]
+    public void NormalCompletionAndHistoricalError(string error) => Skips(Observe($"■ {error}\n› 继续\n• Completed successfully.\n› Ask Codex to do anything\n  GPT-6 high\n"));
+    [Theory] [InlineData(Capacity)] [InlineData(BadRequest)]
+    public void LatestErrorWins(string error) => Skips(Observe($"■ {error}\n› 继续\n■ Conversation interrupted\n› Ask Codex to do anything\n"));
+    [Theory] [InlineData(Capacity)] [InlineData(BadRequest)]
+    public void ToolOutputAndQuotedErrorAreIgnored(string error)
+    { foreach (var prefix in new[] { "  ■ ", "│ ■ ", "> ■ ", "  └ ■ " }) Skips(Observe(prefix + error + "\n› Ask Codex to do anything\n")); }
+    [Theory] [InlineData(Capacity)] [InlineData(BadRequest)]
+    public void DraftIsNotOverwritten(string error) => Skips(Observe(Screen(error, prompt: "My unfinished request")));
     [Fact] public void MultilineDraftIsNotOverwritten() => Skips(Observe($"■ {Capacity}\n› \n  second draft line\n  GPT-6 high\n"));
     [Fact] public void MissingPromptAndUnknownAgentAreSkipped()
     { Skips(Observe("■ " + Capacity)); Skips(Observe() with { Agent = new() { Kind = "unknown" } }); Skips(Observe("› ")); }
     [Fact] public void MissingIdentityIsSkipped() => Skips(Observe(pid: null));
-    [Fact] public void OmpRequiresCurrentStructuredErrorAndEmptyEditor()
+    [Theory] [InlineData("Connection reset by peer")] [InlineData(BadRequest)] [InlineData("400 Bad Request")]
+    public void OmpRequiresCurrentStructuredErrorAndEmptyEditor(string error)
     {
-        var transcript = JsonSerializer.Serialize(new { type = "message", id = "error1", message = new { role = "assistant", stopReason = "error", errorMessage = "Connection reset by peer" } });
-        var screen = "Error: Connection reset by peer\n π > model\n╰─\n";
+        var transcript = JsonSerializer.Serialize(new { type = "message", id = "error1", message = new { role = "assistant", stopReason = "error", errorMessage = error } });
+        var screen = $"Error: {error}\n π > model\n╰─\n";
         var o = new Observation(TestData.Session, new() { Kind = "omp" }, screen, Transcript: transcript);
         Assert.Equal(FailureReason.Network, classifier.Assess(o).Evidence!.Reason);
         Skips(o with { Text = screen + "unfinished input" }); Skips(o with { Text = "π > model\n╰─" });
+        Skips(o with { Text = "Error: fetch failed\n π > model\n╰─\n" });
         Skips(o with { Transcript = transcript + "\n{\"type\":\"message\",\"message\":{\"role\":\"user\"}}" });
         Skips(o with { Transcript = transcript + "\n{" });
     }

@@ -8,6 +8,7 @@ namespace Watchdog.Tests;
 internal static class TestData
 {
     public const string Capacity = "Selected model is at capacity. Please try a different model.";
+    public const string BadRequest = "{\"detail\":\"Bad Request\"}";
     public const string JapanFast = "🇯🇵日本高速02|BGP|CUCM", JapanSlow = "🇯🇵日本专线01|BGP|流媒体", OtherNode = "🇺🇸美国01";
     public static readonly Session Session = new("test", new(EndpointKind.UnixSocket, "/tmp/test.sock"));
     public static string Screen(string error = Capacity, string prompt = "Ask Codex to do anything", string prefix = "› Build a feature\n") =>

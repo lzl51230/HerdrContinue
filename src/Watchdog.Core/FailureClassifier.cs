@@ -19,7 +19,7 @@ public sealed class FailureClassifier
         "network connection", "network is unreachable", "fetch failed", "failed to fetch", "error sending request", "request timed out",
         "request timeout", "connect timeout", "connection timed out", "read timeout", "operation timed out", "dns", "econnreset",
         "econnrefused", "etimedout", "enotfound", "socket hang up", "tls handshake", "websocket error", "unexpected eof",
-        "bad gateway", "gateway timeout", "gateway time-out", "upstream connect error", "网络错误", "网络连接失败", "连接中断",
+        "bad request", "bad gateway", "gateway timeout", "gateway time-out", "upstream connect error", "网络错误", "网络连接失败", "连接中断",
         "连接超时", "请求超时", "流式传输失败"];
     private static readonly HashSet<string> Placeholders = ["", "Ask Codex to do anything", "Find and fix a bug in @filename",
         "Write tests for @filename", "Summarize recent commits", "Explain this codebase", "Implement {feature}", "Improve documentation in @filename"];
