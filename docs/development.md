@@ -117,7 +117,7 @@ macOS 自启动原生验收使用 `python3 scripts/qa-startup-macos.py --app-bun
 
 ## 构建与测试
 
-安装 .NET 10 SDK；`global.json` 固定 10.0.403，并允许同补丁系列更新。依赖版本及解析结果记录在各工程的 `packages.lock.json` 中。
+安装 .NET 10 SDK；`global.json` 固定 10.0.403，不自动滚动到其他补丁版本，避免 SDK 隐式依赖与锁文件不一致。依赖版本及解析结果记录在各工程的 `packages.lock.json` 中；升级 SDK 时需同步检查锁文件。
 
 ```sh
 dotnet restore HerdrContinue.slnx --locked-mode
