@@ -77,13 +77,12 @@ public sealed class FailureClassifier
     private static readonly Regex ReconnectHeader = new(
         @"^ ?• Reconnecting(?:\.\.\.|…) [1-9]\d*/[1-9]\d* \((?:\d+[hms] +)+• esc to interrupt\) *$");
     private const string CapacityLine = "└ Selected model is at capacity. Please try a different model.";
-    private const string FeedbackTip = "└ Tip: Use /feedback to send logs to the maintainers when something looks off.";
 
     private static Assessment Reconnect(string[] lines, int input)
     {
         var end = input - 1;
         while (end >= 0 && string.IsNullOrWhiteSpace(lines[end])) end--;
-        if (end >= 0 && lines[end].Trim() == FeedbackTip) end--;
+        if (end >= 0 && lines[end].Trim().StartsWith("└ Tip: ", StringComparison.Ordinal)) end--;
         if (end < 1 || lines[end].Trim() != CapacityLine || !ReconnectHeader.IsMatch(lines[end - 1]))
             return Assessment.Skip("正在运行");
         var context = ContextBefore(lines, end - 1);

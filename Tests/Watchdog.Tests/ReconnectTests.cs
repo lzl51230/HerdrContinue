@@ -13,6 +13,8 @@ public sealed class ReconnectTests
     private const string Header = "• Reconnecting... 1/5 (1h 09m 26s • esc to interrupt)";
     private const string Tip = "  └ Tip: Use /feedback to send logs to the maintainers when something looks off.";
     private const string Block = Header + "\n  └ " + Capacity + "\n" + Tip;
+    private const string ArchiveBlock = "• Reconnecting... 2/5 (8m 02s • esc to interrupt)\n  └ " + Capacity +
+        "\n  └ Tip: Use /archive to archive the current session.";
     private const string Editor = "\n\n› Ask Codex to do anything\n\n  GPT-6.2-Astra high · ~/project\n  ← for agents · ? for shortcuts   ⚠ 1 warning · f2 to view\n";
     private const string Interrupted = "■ Conversation interrupted - use /feedback if something went wrong";
     private static Observation Working(string block = Block) => Observe(History + block + Editor, status: "working");
@@ -27,7 +29,9 @@ public sealed class ReconnectTests
         Assert.Equal(FailureReason.Capacity, evidence.Reason);
         Assert.NotNull(evidence.ReconnectContext);
         Assert.Equal(evidence, classifier.Assess(Working(Block.Replace("1h 09m 26s", "4s").Replace(Tip, ""))).Evidence);
-        foreach (var block in new[] { Capacity, Block.Replace(Capacity, "Connection reset"), "  " + Block,
+        Assert.Equal(evidence, classifier.Assess(Working(ArchiveBlock)).Evidence);
+        Assert.Equal(evidence, classifier.Assess(Working(Block.Replace(Tip, "  └ Tip: Try a new shortcut."))).Evidence);
+        foreach (var block in new[] { ArchiveBlock + "\n  └ Other output", ArchiveBlock + "\n" + Tip, Capacity, Block.Replace(Capacity, "Connection reset"), "  " + Block,
             Block + "\n• Completed successfully.", Block + "\n› new task", Block + "\n■ Conversation interrupted" })
             Assert.Null(classifier.Assess(Working(block)).Evidence);
         Assert.Null(classifier.Assess(Working() with { Text = History + Block }).Evidence);
@@ -35,19 +39,21 @@ public sealed class ReconnectTests
         Assert.Null(classifier.Assess(Working() with { ForegroundPid = null }).Evidence);
     }
 
-    [Fact]
-    public async Task MonitorInterruptsOnceThenPromptsOnceAfterAcknowledgedInterruption()
+    [Theory]
+    [InlineData(Block, Interrupted)]
+    [InlineData(ArchiveBlock, ArchiveBlock + "\n" + Interrupted)]
+    public async Task MonitorInterruptsOnceThenPromptsOnceAfterAcknowledgedInterruption(string block, string interruptedScreen)
     {
-        var service = new FakeHerdr { Value = Working() };
+        var service = new FakeHerdr { Value = Working(block) };
         await using var monitor = new MonitorEngine(service, new FakeClash());
         await monitor.StartAsync(false);
         await monitor.Proxy.CheckNowAsync();
         await monitor.ScanNowAsync();
         await Eventually(() => monitor.Snapshot.Events.Any(e => e.Message.Contains("已确认 Esc")));
-        service.Value = Working(Block.Replace("26s", "28s"));
+        service.Value = Working(block.Replace("26s", "28s").Replace("02s", "04s"));
         await monitor.ScanNowAsync();
         Assert.Equal(0, service.Sent);
-        service.Value = Stopped();
+        service.Value = Stopped(interruptedScreen);
         await monitor.ScanNowAsync();
         await Eventually(() => monitor.Snapshot.Events.Any(e => e.Message.Contains("已确认提交")));
         await monitor.ScanNowAsync();
