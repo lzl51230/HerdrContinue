@@ -101,6 +101,7 @@ public sealed class FeatureToggleTests
         public Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken ct)=>inner.SessionsAsync(ct);
         public Task<IReadOnlyList<Agent>> AgentsAsync(Session s,CancellationToken ct)=>inner.AgentsAsync(s,ct);
         public Task<Observation> ObserveAsync(Agent a,Session s,bool refresh,CancellationToken ct)=>inner.ObserveAsync(a,s,refresh,ct);
+        public Task InterruptAsync(Observation o, CancellationToken ct) => inner.InterruptAsync(o, ct);
         public async Task ResumeAsync(Observation o,CancellationToken ct){Sent++;Started.TrySetResult();await Release.Task.WaitAsync(ct);}
     }
 }

@@ -222,6 +222,7 @@ internal sealed class MemoryQaApplication : Application
         public Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken ct) => throw new InvalidOperationException("QA must not discover real sessions.");
         public Task<IReadOnlyList<Agent>> AgentsAsync(Session s, CancellationToken ct) => throw new InvalidOperationException();
         public Task<Observation> ObserveAsync(Agent a, Session s, bool refresh, CancellationToken ct) => throw new InvalidOperationException();
+        public Task InterruptAsync(Observation o, CancellationToken ct) => throw new InvalidOperationException();
         public Task ResumeAsync(Observation o, CancellationToken ct) => throw new InvalidOperationException();
     }
     private sealed class NoClash : IClashService

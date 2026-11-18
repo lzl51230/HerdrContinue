@@ -27,7 +27,7 @@ public sealed class LiveHerdrService(string? binary = null, ILocalConnectionFact
     public async Task<Observation> ObserveAsync(Agent original, Session session, bool refresh, CancellationToken cancellationToken)
     {
         var agent = refresh ? ParseAgent((await rpc.CallAsync(session.Endpoint, "agent.get", new Dictionary<string, object?> { ["target"] = original.PaneId }, cancellationToken: cancellationToken)).GetProperty("agent")) : original;
-        if (!agent.AcceptsInput) return new(session, agent, ForegroundPid: null);
+        if (!agent.AcceptsInput && !agent.CanInspectReconnect) return new(session, agent, ForegroundPid: null);
         var read = rpc.CallAsync(session.Endpoint, "agent.read", new Dictionary<string, object?> { ["target"] = agent.PaneId, ["source"] = "detection", ["format"] = "text" }, cancellationToken: cancellationToken);
         var process = rpc.CallAsync(session.Endpoint, "pane.process_info", new Dictionary<string, object?> { ["pane_id"] = agent.PaneId }, cancellationToken: cancellationToken);
         await Task.WhenAll(read, process);
@@ -37,6 +37,10 @@ public sealed class LiveHerdrService(string? binary = null, ILocalConnectionFact
         var transcript = agent.Kind == "omp" && agent.AgentSession is { Kind: "path" } reference ? transcripts.Read(reference.Value) : null;
         return new(session, agent, text, pid, transcript);
     }
+    public Task InterruptAsync(Observation observation, CancellationToken cancellationToken) =>
+        rpc.CallAsync(observation.Session.Endpoint, "agent.send_keys", new Dictionary<string, object?>
+        { ["target"] = observation.Agent.PaneId, ["keys"] = new[] { "esc" } }, cancellationToken: cancellationToken);
+
     public async Task ResumeAsync(Observation observation, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

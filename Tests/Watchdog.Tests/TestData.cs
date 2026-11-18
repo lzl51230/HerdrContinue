@@ -79,7 +79,13 @@ internal sealed class ManualTime : TimeProvider
 internal sealed class FakeHerdr : IHerdrService
 {
     public Observation Value = TestData.Observe();
-    public int Sent;
+    public int Sent, Interrupts;
+    public Task InterruptAsync(Observation o, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref Interrupts);
+        return Task.CompletedTask;
+    }
     public bool Offline = false, Replacement, SlowRefresh;
     public TaskCompletionSource RefreshStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken ct) => Offline ? throw new HerdrException("offline") : Task.FromResult<IReadOnlyList<Session>>([TestData.Session]);

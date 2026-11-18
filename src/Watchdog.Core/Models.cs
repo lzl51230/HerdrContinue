@@ -31,6 +31,7 @@ public sealed record Agent
     public AgentSession? AgentSession { get; init; }
     public bool? InteractiveReady { get; init; }
     public bool? LaunchPending { get; init; }
+    [JsonIgnore] public bool CanInspectReconnect => Kind == "codex" && Status == "working" && LaunchPending != true;
     [JsonIgnore] public bool AcceptsInput => Status is "idle" or "done" && InteractiveReady != false && LaunchPending != true;
 }
 
@@ -43,7 +44,7 @@ public sealed record Observation(Session Session, Agent Agent, string Text = "",
 }
 
 public enum FailureReason { Capacity, Network }
-public sealed record FailureEvidence(FailureReason Reason, string Message, string Fingerprint);
+public sealed record FailureEvidence(FailureReason Reason, string Message, string Fingerprint, string? ReconnectContext = null);
 public sealed record Assessment(FailureEvidence? Evidence, string Detail)
 {
     public static Assessment Skip(string detail) => new(null, detail);
@@ -63,6 +64,7 @@ public interface IHerdrService
     Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<Agent>> AgentsAsync(Session session, CancellationToken cancellationToken);
     Task<Observation> ObserveAsync(Agent agent, Session session, bool refresh, CancellationToken cancellationToken);
+    Task InterruptAsync(Observation observation, CancellationToken cancellationToken);
     Task ResumeAsync(Observation observation, CancellationToken cancellationToken);
 }
 

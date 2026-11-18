@@ -60,6 +60,7 @@ internal sealed class IsolatedService(Session session, IHerdrService inner) : IH
     public Task<IReadOnlyList<Session>> SessionsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Session>>([session]);
     public Task<IReadOnlyList<Agent>> AgentsAsync(Session s, CancellationToken ct) => inner.AgentsAsync(s, ct);
     public Task<Observation> ObserveAsync(Agent a, Session s, bool refresh, CancellationToken ct) => inner.ObserveAsync(a, s, refresh, ct);
+    public Task InterruptAsync(Observation o, CancellationToken ct) => inner.InterruptAsync(o, ct);
     public Task ResumeAsync(Observation o, CancellationToken ct) => inner.ResumeAsync(o, ct);
 }
 internal sealed class HealthyTestProxy : IClashService

@@ -254,22 +254,40 @@ public sealed class MonitorEngine : IAsyncDisposable
             {
                 if (!Active(token) || ct.IsCancellationRequested || !CanResume || proxyRecoveryEnabled && Proxy.HealthEpoch != proxyEpoch) return;
                 if (!machine.Claim(intent, fresh, clock.Now)) { Append(target, "已取消本次发送：状态、输入或 agent 身份发生变化"); return; }
-                attempt.Submitted = true;
-                try { submission = service.ResumeAsync(fresh, ct); }
+                attempt.Submitted = !intent.SendsEscape;
+                try { submission = intent.SendsEscape ? service.InterruptAsync(fresh, ct) : service.ResumeAsync(fresh, ct); }
                 catch (Exception e) { submission = Task.FromException(e); }
-                Append(target, "发送「继续」并回车；依据：" + intent.Evidence.Message[..Math.Min(300, intent.Evidence.Message.Length)]);
+                Append(target, intent.SendsEscape ? "模型容量不足，发送 Esc 中断当前重连" : "发送「继续」并回车；依据：" + intent.Evidence.Message[..Math.Min(300, intent.Evidence.Message.Length)]);
             }
             try
             {
                 await submission;
-                lock (sync) { if (!Active(token)) return; machine.SubmissionConfirmed(fresh.Key); Append(target, "Herdr 已确认提交并观察到 agent 开始运行"); }
+                lock (sync)
+                {
+                    if (!Active(token)) return;
+                    if (intent.SendsEscape)
+                    {
+                        machine.EscapeFinished(intent, confirmed: true, definitelyNotSent: false);
+                        Append(target, "Herdr 已确认 Esc，等待中断画面");
+                        return;
+                    }
+                    machine.SubmissionConfirmed(fresh.Key);
+                    Append(target, "Herdr 已确认提交并观察到 agent 开始运行");
+                }
             }
             catch (Exception e)
             {
                 lock (sync)
                 {
                     if (!Active(token)) return;
-                    machine.SubmissionFailed(fresh.Key, e is HerdrException { DefinitelyNotSent: true }, clock.Now);
+                    var unsent = e is HerdrException { DefinitelyNotSent: true };
+                    if (intent.SendsEscape)
+                    {
+                        machine.EscapeFinished(intent, confirmed: false, definitelyNotSent: unsent);
+                        Append(target, "中断重连异常：" + e.Message);
+                        return;
+                    }
+                    machine.SubmissionFailed(fresh.Key, unsent, clock.Now);
                     Append(target, "提交异常：" + e.Message);
                 }
             }

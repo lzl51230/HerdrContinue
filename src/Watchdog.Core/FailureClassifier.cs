@@ -35,6 +35,8 @@ public sealed class FailureClassifier
     public Assessment Assess(Observation observation)
     {
         if (observation.Error is not null) return Assessment.Skip("读取失败，等待重连");
+        if (observation.Agent.CanInspectReconnect && observation.ForegroundPid is not null)
+            return Codex(observation.Text, working: true);
         if (!observation.Agent.AcceptsInput) return Assessment.Skip(observation.Agent.Status switch
         { "working" => "正在运行", "blocked" => "等待人工确认", _ => "状态未知或尚未就绪" });
         if (observation.ForegroundPid is null) return Assessment.Skip("无法确认当前进程");
@@ -42,14 +44,13 @@ public sealed class FailureClassifier
         { "codex" => Codex(observation.Text), "omp" => Omp(observation), _ => Assessment.Skip("原因未知：尚无此 agent 的可靠解析规则") };
     }
 
-    private Assessment Codex(string text)
+    private Assessment Codex(string text, bool working = false)
     {
         var lines = Clean(text).Split('\n');
-        var input = Array.FindLastIndex(lines, l => l.Trim().StartsWith('›'));
-        if (input < 0) return Assessment.Skip("无法确认输入框");
-        if (!Placeholders.Contains(lines[input].Trim()[1..].Trim())) return Assessment.Skip("输入框已有草稿，暂不发送");
-        if (!lines.Skip(input + 1).Where(l => !string.IsNullOrWhiteSpace(l)).All(IsFooter))
-            return Assessment.Skip("输入区域不明确，暂不发送");
+        var input = Editor(lines, out var problem);
+        if (problem is not null) return working ? Assessment.Skip("正在运行") : Assessment.Skip(problem);
+        if (working) return Reconnect(lines, input);
+
         var error = input == 0 ? -1 : Array.FindLastIndex(lines, input - 1, input, l => l.StartsWith("■ ") || l.StartsWith(" ■ "));
         if (error < 0) return Assessment.Skip("未发现当前容量或网络错误");
         var continuation = lines.Skip(error + 1).Take(input - error - 1).TakeWhile(l =>
@@ -61,6 +62,54 @@ public sealed class FailureClassifier
         var previous = error == 0 ? -1 : Array.FindLastIndex(lines, error - 1, error, l => l.Trim().StartsWith('›'));
         var start = previous >= 0 ? previous : Math.Max(0, error - 8);
         return Assessment.Failure(new(reason, message, Digest(string.Join('\n', lines[start..(error + 1)]) + message)));
+    }
+
+    private static int Editor(string[] lines, out string? problem)
+    {
+        var input = Array.FindLastIndex(lines, l => l.Trim().StartsWith('›'));
+        problem = null;
+        if (input < 0) problem = "无法确认输入框";
+        else if (!Placeholders.Contains(lines[input].Trim()[1..].Trim())) problem = "输入框已有草稿，暂不发送";
+        else if (!lines.Skip(input + 1).All(IsFooter)) problem = "输入区域不明确，暂不发送";
+        return input;
+    }
+
+    private static readonly Regex ReconnectHeader = new(
+        @"^ ?• Reconnecting(?:\.\.\.|…) [1-9]\d*/[1-9]\d* \((?:\d+[hms] +)+• esc to interrupt\) *$");
+    private const string CapacityLine = "└ Selected model is at capacity. Please try a different model.";
+    private const string FeedbackTip = "└ Tip: Use /feedback to send logs to the maintainers when something looks off.";
+
+    private static Assessment Reconnect(string[] lines, int input)
+    {
+        var end = input - 1;
+        while (end >= 0 && string.IsNullOrWhiteSpace(lines[end])) end--;
+        if (end >= 0 && lines[end].Trim() == FeedbackTip) end--;
+        if (end < 1 || lines[end].Trim() != CapacityLine || !ReconnectHeader.IsMatch(lines[end - 1]))
+            return Assessment.Skip("正在运行");
+        var context = ContextBefore(lines, end - 1);
+        return Assessment.Failure(new(FailureReason.Capacity, CapacityLine[2..], Digest("reconnect:" + context), context));
+    }
+
+    private static string ContextBefore(string[] lines, int index)
+    {
+        var history = lines.Take(index);
+        var lastPrompt = history.LastOrDefault(line => line.TrimStart().StartsWith('›'));
+        var tail = history.Where(line => !string.IsNullOrWhiteSpace(line)).TakeLast(4);
+        return Digest(lastPrompt + "\n" + string.Join('\n', tail));
+    }
+
+    internal static bool HasInterruptionScreen(Observation observation, string context)
+    {
+        if (observation.Error is not null) return false;
+        var lines = Clean(observation.Text).Split('\n');
+        var input = Editor(lines, out var problem);
+        if (problem is not null || input == 0) return false;
+        var marker = Array.FindLastIndex(lines, input - 1, input, l =>
+            Regex.IsMatch(l, @"^ ?■ Conversation interrupted(?:$| [—–-] )", RegexOptions.IgnoreCase));
+        if (marker < 0 || lines[(marker + 1)..input].Any(l => !string.IsNullOrWhiteSpace(l) &&
+                !(l.StartsWith("  ") && char.IsLetterOrDigit(l.TrimStart()[0])))) return false;
+        return ContextBefore(lines, marker) == context ||
+            Reconnect(lines, marker).Evidence?.ReconnectContext == context;
     }
 
     private Assessment Omp(Observation observation)
